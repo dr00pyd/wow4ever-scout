@@ -28,7 +28,8 @@ All fil- och processåtkomst går genom `SafeFs.cs` (samma statiska vakt, `Stati
 | `…/SavedVariables/Auctionator.lua`, `…/Auc-Stat-Simple.lua` | läsa, **bara** när "Dela auktionspriser" är på (av som standard) |
 | `<spelkatalog>/Cache/ADB/*/DBCache.bin` | läsa |
 | `<spelkatalog>/Cache/WDB/*/creaturecache.wdb` | läsa (varelsecachen, 1.0.14 – kan stängas av i Inställningar) |
-| `Interface`, `WTF/Account/*`, `…/SavedVariables`, `Cache/ADB/*` | bara existens och listning |
+| `<spelkatalog>/Screenshots/WoWScrnShot_MMDDYY_HHMMSS.jpg`/`.jpeg`/`.png`/`.tga` | läsa (1.0.17 – bara spelets egna skärmbilder, och av dem bara den som en `/scout bild`-post i addonens fil pekar ut; kan stängas av i Inställningar) |
+| `Interface`, `WTF/Account/*`, `…/SavedVariables`, `Cache/ADB/*`, `Cache/WDB/*`, `Screenshots` | bara existens och listning |
 | `~/.config/ForeverScout/**` (katalogen 0700; `$XDG_CONFIG_HOME` följs) | `settings.json`, `uploads.log`, `instance.lock`, `instance.sock`, `contributor-key` (0600) |
 | `~/.config/autostart/se.wow4ever.foreverscout.desktop` | när "Starta vid inloggning" är på – från 1.0.12 förvalt på välkomstskärmen (går att kryssa ur), annars av tills du kryssar i den i Inställningar |
 
@@ -66,12 +67,28 @@ efter `--restarted`), ärlig status och statusrad, "Välj WoW-katalog" som huvud
 mappsymbol – alla skrivbord har inte ett färgemoji-typsnitt), ingen dialog vid autostart (rad i lägerjournalen och
 fältikonen med röd prick i stället), addonens fel ligger kvar efter nästa synk, och Enter väljer guldknappen.
 
+## 1.0.17 – bilder tagna med `/scout bild`
+Samma som Windows 1.0.15–1.0.17 och macOS-appen (se "1.0.17" i `client/mac/README.md`); 1.0.15 och 1.0.16 släpptes
+aldrig för Linux. Bilden som en post i addonens fil pekar ut letas upp i `<spelkatalog>/Screenshots` (i Wine-prefixet,
+samma katalog som `WTF` och `Interface` ligger i), beskärs till skärmens mitt, förminskas till högst 1600 px och
+skickas som JPEG utan metadata. Inställningen "Ladda upp bilder tagna med /scout bild" är på som standard.
+- **Kodaren är `SkiaShotEncoder.cs` i macOS-appens källfiler (SkiaSharp)** – Skia är det Avalonia redan ritar med, så
+  `SkiaSharp.dll` och `libSkiaSharp.so` (libjpeg-turbo och libpng inbyggda) fanns redan i AppImage-filen. Inget nytt
+  paket, inget nytt systembibliotek hos användaren och inget nytt i byggcontainern: fillistan i paketet är oförändrad
+  och det växer bara med koden i `ForeverScout.dll` (några kB).
+- Filnamnets tid är lokal tid. Wine ger spelet datorns tidszon, så `WoWScrnShot_MMDDYY_HHMMSS` stämmer med postens
+  tid; skulle ett prefix köra med en annan tidszon används filens ändringstid (±3 s) i stället.
+- Katalogen måste heta exakt `Screenshots` (så skriver spelet den); Linux filsystem skiljer på stora och små bokstäver.
+
 ## Bygga
 ```bash
 client/linux/build.sh                 # tester + dotnet publish linux-x64 + dist/ForeverScout-linux-x64-<v>.tar.gz
 ```
 Går att köra på Linux, macOS och Windows (Git Bash); kräver .NET SDK 10 och Python 3 (packar tar.gz med rätt
-rättigheter även från NTFS). På Linux görs sedan AppImage-filen (kräver `squashfs-tools`):
+rättigheter även från NTFS). **Från 1.0.17** laddar testerna Skia (`ShotEncoderTests`): körs `build.sh` i en
+Linux-container utan skrivbord behöver den `libfontconfig1`, som `libSkiaSharp.so` länkar mot
+(`apt-get install -y libfontconfig1`) – annars faller testet `TheNativeSkiaLibraryLoads` med just den upplysningen.
+På Windows och macOS behövs inget extra. På Linux görs sedan AppImage-filen (kräver `squashfs-tools`):
 ```bash
 curl -fsSLO https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64
 client/linux/packaging/make-appimage.sh dist/ForeverScout-linux-x64-<v>.tar.gz runtime-x86_64 ForeverScout-x86_64.AppImage
@@ -94,6 +111,10 @@ Nedladdningssidan visar Linux-kortet först när fälten och `signature5` finns 
 påverkas), autostart-filens citering, och på Linux (`[LinuxFact]`) nyckelfilens rättigheter och sökrötterna.
 Provkört i en Debian-container med virtuell skärm: appen startar, ritar onboarding-fönstret och skapar
 `~/.config/ForeverScout` med 0700. **Inte provkört** på ett riktigt skrivbord med WoW under Wine.
+`ShotEncoderTests.cs` (1.0.17): bildkodarens mått mot Windows-klientens, ingen metadata, TGA, och hela kedjan med en
+spelkatalog i ett Wine-prefix (`…/drive_c/Program Files (x86)/World of Warcraft/_forever_/Screenshots`). Kodaren är
+**bara körd på Windows** – kör `dotnet test client/mac/tests` i byggcontainern (det gör `build.sh`) så provas den mot
+`libSkiaSharp.so`, och prova sedan en riktig bild med `/scout bild` under Wine.
 
 ## Krav på användarens dator
 x64, glibc-baserad distribution, X11 eller XWayland, fontconfig och ICU (finns på alla vanliga skrivbord). AppImage

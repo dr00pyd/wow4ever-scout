@@ -19,6 +19,7 @@ internal sealed class SettingsWindow : Window
     private readonly CheckBox _autoupload = Check(T("set.autoupload"));
     private readonly CheckBox _hotfix = Check(T("set.hotfix"));
     private readonly CheckBox _creatures = Check(T("set.creaturecache")); // 1.0.14: varelsecachen
+    private readonly CheckBox _shots = Check(T("set.shots")); // 1.0.17: bilder tagna med /scout bild
     private readonly CheckBox _auction = Check(T("set.auction"));
     private readonly CheckBox _beta = Check(T("set.beta"));
     private readonly CheckBox _askClose = Check(T("set.askclose"));
@@ -65,6 +66,11 @@ internal sealed class SettingsWindow : Window
         creaturesHint.MaxWidth = 520;
         creaturesHint.Margin = new Thickness(28, 0, 0, 4);
         flow.Children.Add(creaturesHint);
+        flow.Children.Add(_shots);
+        var shotsHint = Look.Label(T("set.shots.hint"), 12, Look.Muted);
+        shotsHint.MaxWidth = 520;
+        shotsHint.Margin = new Thickness(28, 0, 0, 4);
+        flow.Children.Add(shotsHint);
         flow.Children.Add(_auction);
         flow.Children.Add(_beta); // 1.0.13: beta-kanalen för testare
         var auctionHint = Look.Label(T("set.auction.hint"), 12, Look.Muted);
@@ -133,6 +139,7 @@ internal sealed class SettingsWindow : Window
         _autoupload.IsChecked = settings.AutoUpload;
         _hotfix.IsChecked = settings.UploadHotfix;
         _creatures.IsChecked = settings.UploadCreatureCache;
+        _shots.IsChecked = settings.UploadShots;
         _auction.IsChecked = settings.ShareAuctionPrices;
         _beta.IsChecked = settings.Beta;
         _askClose.IsChecked = !settings.DontAskOnClose;
@@ -173,6 +180,7 @@ internal sealed class SettingsWindow : Window
         _settings.AutoUpload = _autoupload.IsChecked == true;
         _settings.UploadHotfix = _hotfix.IsChecked == true;
         _settings.UploadCreatureCache = _creatures.IsChecked == true;
+        _settings.UploadShots = _shots.IsChecked == true;
         _settings.ShareAuctionPrices = _auction.IsChecked == true;
         _settings.Beta = _beta.IsChecked == true;
         _settings.DontAskOnClose = _askClose.IsChecked != true;

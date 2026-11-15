@@ -25,6 +25,7 @@ vad bidraget ledde till. Kontrakt: `docs/briefs/SCOUT-KONTRAKT.md`.
 | `ForeverScout.Mac/OnboardingWindow.cs` | "Slå dig ner vid elden." – logga in med webbläsaren, namn eller kod |
 | `ForeverScout.Mac/BrowserLinkWindow.cs` | Logga in med webbläsaren: koden, väntan på godkännande, Avbryt (Core: `DeviceLink`) |
 | `ForeverScout.Mac/SettingsWindow.cs`, `PayloadWindow.cs`, `Dialogs.cs` | Inställningar, "Visa vad som skickas", dialoger |
+| `ForeverScout.Mac/SkiaShotEncoder.cs` | 1.0.17: förminskar bilder tagna med `/scout bild` (Skia, som Avalonia redan har med sig) – delas med Linux |
 | `ForeverScout.Mac/Look.cs` | Lägereld-tokens (samma värden som `Theme` i Windows-klientens `Support.cs`) |
 | `ForeverScout.Mac/KeychainStore.cs` | Nyckeln i nyckelringen (Security.framework via P/Invoke) |
 | `ForeverScout.Mac/Assets/` | Menyradsikoner (mall + färg), logotyp, appikon 256 – från `make-icons.mjs` |
@@ -46,7 +47,8 @@ nu också granskar `client/mac/ForeverScout.Mac`). På macOS gäller:
 | `<spelkatalog>/WTF/Account/*/SavedVariables/Auctionator.lua`, `…/Auc-Stat-Simple.lua` | läsa, **bara** när "Dela auktionspriser" är på (av som standard). Filen skickas aldrig, bara föremål, realm/fraktion, dag, lägsta pris och antal (se Windows-README och `docs/SCOUT.md`) |
 | `<spelkatalog>/Cache/ADB/*/DBCache.bin` | läsa |
 | `<spelkatalog>/Cache/WDB/*/creaturecache.wdb` | läsa (varelsecachen, 1.0.14 – kan stängas av i Inställningar) |
-| `Interface`, `WTF/Account/*`, `…/SavedVariables`, `Cache/ADB/*` | bara existens och listning |
+| `<spelkatalog>/Screenshots/WoWScrnShot_MMDDYY_HHMMSS.jpg`/`.jpeg`/`.png`/`.tga` | läsa (1.0.17 – bara spelets egna skärmbilder, och av dem bara den som en `/scout bild`-post i addonens fil pekar ut; kan stängas av i Inställningar) |
+| `Interface`, `WTF/Account/*`, `…/SavedVariables`, `Cache/ADB/*`, `Cache/WDB/*`, `Screenshots` | bara existens och listning |
 | `~/Library/Application Support/ForeverScout/**` (katalogen 0700) | `settings.json`, `uploads.log`, `instance.lock`, `instance.sock` |
 | `~/Library/LaunchAgents/se.wow4ever.foreverscout.plist` | när "Starta vid inloggning" är på – från 1.0.12 förvalt på välkomstskärmen (går att kryssa ur), annars av tills du kryssar i den i Inställningar |
 | det egna `Forever Scout.app` (som helhet) och `.ForeverScout-update/` bredvid det | bara under självuppdateringen |
@@ -125,6 +127,36 @@ Reglerna ligger som rena funktioner i `Rules112` (`Support.cs`) och testas i `te
   Windows (`onb.autostart`, `autostart.ask`, `autostart.ask.title`, `gamedir.toast`) har appen egna `mac.`/`linux.`-texter
   i `Texts.Local` (`Support.cs`), så att Core och Windows-klienten inte ändras.
 
+### 1.0.17 – bilder tagna med `/scout bild` (samma som Windows 1.0.15–1.0.17)
+Gäller också Linux (samma källfiler). Versionerna 1.0.15 och 1.0.16 släpptes aldrig för macOS/Linux.
+- All logik är Core, oförändrad: addonens poster (`ForeverScoutDB.shots`), matchningen mot spelets fil i
+  `<spelkatalog>/Screenshots` (filnamnets tid ±3 s, annars ändringstiden), kön i `settings.json`, SafeFs-regeln och
+  `POST /api/bidrag/bild` (`Shots.cs`, `Uploader.cs`, kontraktet i `docs/briefs/SCOUT-KONTRAKT.md`). Det enda som
+  saknades var plattformens bildkodare (`IShotEncoder`).
+- **Kodaren: `SkiaShotEncoder.cs` (SkiaSharp).** Avalonia ritar redan hela gränssnittet med Skia, så `SkiaSharp.dll` och
+  `libSkiaSharp.dylib`/`.so` (med libjpeg-turbo och libpng inbyggda) ligger redan i paketet. Inget nytt NuGet-paket,
+  inget nytt systembibliotek, inga nya rättigheter (entitlements) och inget nytt att signera: paketet har exakt samma
+  filer som förut och växer bara med koden i `ForeverScout.dll` (några kB). Valdes framför ImageIO/CoreGraphics
+  (P/Invoke som bara går att prova på en Mac, och en andra kodare för Linux) och ett hanterat bildbibliotek (ett nytt
+  beroende på ett par MB).
+- **Samma resultat som Windows (`GdiShotEncoder`):** utsnittet räknas av den rena funktionen `ShotCrop.For` – 62 % av
+  höjden, bredd 1,45 × den höjden (högst bildens bredd), vågrätt centrerat, 30 % av marginalen ovanför – och förminskas
+  till högst 1600 px bredd (aldrig uppåt). JPEG, PNG och spelets TGA (okomprimerad/RLE, 24/32 bitar) läses; andra
+  format avvisas. Bilden ritas om i en ny bitmapp utan färgprofil och kodas som JPEG: bara JFIF-huvudet följer med,
+  ingen EXIF/XMP, kommentar eller färgprofil.
+- **Inställningen** "Ladda upp bilder tagna med /scout bild" (på som standard, Core-texterna `set.shots` och
+  `set.shots.hint`) ligger under varelsecachen i Inställningar. Av: `Screenshots` listas och läses inte. "Visa vad som
+  skickas" (`UploadPreview` i Core) visar bildposterna som väntar, och lägerjournalen skriver `journal.shots`.
+- **Tester:** `tests/ShotEncoderTests.cs` (körs på Windows, macOS och Linux): måtten mot Windows-klientens förväntade
+  värden (3840×2160 → 1600×1103, 1280×720 → 647×446, 3440×1440 → 1295×893, TGA 2001×1000 → 899×620), ingen metadata i
+  resultatet, skräp och avhuggna filer, och hela kedjan mot en låtsasserver med en spelkatalog i ett Wine-prefix.
+- **Inte provat på en Mac eller i Linux:** kodaren är bara körd på Windows (samma Skia-version, 3.119.4, men Windows
+  egna `libSkiaSharp`). Prova på Macen efter bygget: `dotnet test client/mac/tests` (ShotEncoderTests ska gå igenom
+  mot `libSkiaSharp.dylib`), ta sedan en bild i spelet med `/scout bild`, gör `/reload` och se att lägerjournalen
+  skriver "1 bild(er) mottagna" och att `uploads.log` har en rad `bild … ok`. Kontrollera också att spelet på macOS
+  döper filen `WoWScrnShot_MMDDYY_HHMMSS.jpg` och lägger den i `_forever_/Screenshots` (annars hittas den inte –
+  posten ges då upp efter 24 timmar utan att något annat läses).
+
 ## Uppdateringar
 `public/scout/version.json` får fyra nya fält och en tredje signatur. Windows påverkas inte:
 - `mac`, `macFile` (`ForeverScout-mac.zip`), `macSha256`, `macSig` – zip:en med det **färdiga** paketet: kodsignerat
@@ -163,7 +195,7 @@ dotnet publish client/mac/ForeverScout.Mac -c Release -r osx-arm64 -o client/mac
 node client/windows/tools/make-icons.mjs --mac-only             # ikonerna (rör inte Windows-filerna)
 ```
 På Windows testas: Mac-reglerna som rena funktioner, signature3 mot ordagrann 1.0.6/1.0.2-kod, en-instans-låset och
-socketen (Windows 10+ har AF_UNIX) och Windows-klientens plattformsoberoende tester. På en Mac körs dessutom de riktiga
+socketen (Windows 10+ har AF_UNIX), bildkodaren (`ShotEncoderTests`, 1.0.17) och Windows-klientens plattformsoberoende tester. På en Mac körs dessutom de riktiga
 filsystemstesterna: symlänkar, 0700, skiftläge, `ditto` och paketbytet.
 
 ## Steg för steg på Macen (signering, notarisering, släpp)

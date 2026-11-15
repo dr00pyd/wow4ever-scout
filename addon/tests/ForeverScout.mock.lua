@@ -83,7 +83,7 @@ ForeverScoutDB = { seq = 7, objects = { [999001] = { n = "Old Chest" }, [999003]
 fire("ADDON_LOADED", "ForeverScout")
 local T = ns._test
 local db = T.db()
-check(db.addon == "1.0.23", "addonversion 1.0.23")
+check(db.addon == "1.0.24", "addonversion 1.0.24")
 check(db.objects[999001].q and db.objects[999001].q > 7 and db.npcs[999002].q and db.npcs[999002].q > 7, "1.0.10: gamla poster utan position får löpnummer vid start")
 check(db.objects[999003].q == nil, "1.0.10: poster med position behåller löpnumret i sina platser")
 check(type(db.mobs) == "table" and type(db.mail) == "table", "mobs och mail finns")
@@ -98,7 +98,7 @@ do
   check(frame.events.PLAYER_LOGIN, "händelsen registrerad: PLAYER_LOGIN")
   fire("PLAYER_LOGIN")
   DEFAULT_CHAT_FRAME.AddMessage = old
-  check(#said == 1 and said[1]:find("1.0.23", 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
+  check(#said == 1 and said[1]:find("1.0.24", 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
 end
 
 ---------------------------------------------------------------------------
@@ -1075,7 +1075,7 @@ do
   SlashCmdList.FOREVERSCOUT("")
   CreateFrame = oldCF
   DEFAULT_CHAT_FRAME.GetNumMessages, DEFAULT_CHAT_FRAME.GetMaxLines, DEFAULT_CHAT_FRAME.AddMessage = nil, nil, old
-  check(shown and txt and txt:find("1.0.23", 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
+  check(shown and txt and txt:find("1.0.24", 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
         "1.0.18: syns inte raden i chatten visas svaret i Forever Scout-fönstret (stängs med Esc)")
 end
 
@@ -1370,6 +1370,21 @@ do
   check(r and r.id == 1234, "1.0.23: efter 3 s gäller det markerade målet igen")
   T.session.shotSeen = nil
   units.target, units.mouseover = nil, nil
+
+  -- 1.0.24: bossen markeras före striden; i striden lämnar spelet inte ut målets uppgifter (hemliga värden)
+  units.target = { guid = "Creature-0-1-2-3-4274-0000000007", name = "Fenrus the Devourer", level = 25 }
+  fire("PLAYER_TARGET_CHANGED")
+  local realSecret = issecretvalue
+  issecretvalue = function() return true end          -- allt om enheter är hemligt nu
+  r = T.session.shotTarget()
+  check(r and r.id == 4274 and r.n == "Fenrus the Devourer", "1.0.24: målet från före striden används när uppgifterna är dolda")
+  fire("PLAYER_TARGET_CHANGED")                         -- målet byts medan uppgifterna är dolda
+  local r2, why2 = T.session.shotTarget()
+  check(r2 == nil and why2 == "hidden", "1.0.24: bytt mål under dolda uppgifter ger ingen bild, och skälet är 'hidden'")
+  issecretvalue = realSecret
+  units.target = nil
+  fire("PLAYER_TARGET_CHANGED")
+  check(T.session.shotLastTarget == nil and T.session.shotTargetStale == false, "1.0.24: utan mål glöms minnet")
   check(T.session.errors == errors0, "1.0.20 utan fångade fel (" .. tostring(T.session.lastError) .. ")")
 
   units.target, units.mouseover = nil, nil

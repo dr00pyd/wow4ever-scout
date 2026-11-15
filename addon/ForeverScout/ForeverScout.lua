@@ -14,7 +14,7 @@
 local ADDON, ns = ...
 ns = ns or {}
 
-local VERSION = "1.0.23"
+local VERSION = "1.0.24"
 local FORMAT = 1
 local MAX_SPOTS = 50          -- per NPC / object, oldest dropped
 local MAX_LOOT = 2000         -- loot entries, oldest dropped
@@ -2447,14 +2447,44 @@ end
 
   -- Vad bilden föreställer: posten (k, id, n) eller nil och skälet ("player" = bara spelare/husdjur fanns, "none").
   -- NPC:n i enheten (target/mouseover) som bildpost, eller nil; andra värdet = true om enheten finns men inte får fotas.
+  -- Tredje värdet (1.0.24) = "hidden" när spelet inte lämnar ut enhetens uppgifter (hemliga värden i strid i
+  -- instanser): då är det inte en vägran av en spelare utan något addonet inte får läsa just nu.
   local function unitRec(unit)
-    if unitFlag(UnitExists, unit) ~= true then return nil, false end
+    local exists = unitFlag(UnitExists, unit)
+    if exists == false then return nil, false end
+    if exists == nil then return nil, true, "hidden" end
     if wildNpc(unit) then
       local kind, id = parseGuid(str(try(UnitGUID, unit)))
       local name = plainName(try(UnitName, unit))
       if kind == "npc" and name then return { k = "npc", id = id, n = name }, false end
+      return nil, true, "hidden"   -- en NPC, men GUID eller namn lämnas inte ut
     end
-    return nil, true
+    -- säkert en spelare eller ett husdjur? Bara då är det en vanlig vägran; annars gick uppgifterna inte att läsa
+    local player = unitFlag(UnitIsPlayer, unit) == true or unitFlag(UnitPlayerControlled, unit) == true
+    return nil, true, (not player) and "hidden" or nil
+  end
+
+  -- Varför en enhet inte godtogs – till diagnosen (inga namn, bara ja/nej/okänt per kontroll).
+  local function unitWhy(unit)
+    local function f(fn) local v = unitFlag(fn, unit); return v == nil and "?" or (v and "1" or "0") end
+    local kind = parseGuid(str(try(UnitGUID, unit)))
+    return unit .. ":ex=" .. f(UnitExists) .. ",pl=" .. f(UnitIsPlayer) .. ",pc=" .. f(UnitPlayerControlled) .. ",dead=" .. f(UnitIsDead)
+      .. ",guid=" .. tostring(kind) .. ",name=" .. tostring(plainName(try(UnitName, unit)) ~= nil)
+      .. ",combat=" .. tostring(unitFlag(InCombatLockdown))
+  end
+
+  -- 1.0.24: minns vem målet är när det markeras (PLAYER_TARGET_CHANGED). I strid i en instans lämnar spelet inte ut
+  -- målets uppgifter, men markerades bossen före striden vet addonen redan vem det är. Byts målet medan uppgifterna
+  -- är dolda glöms minnet (stale) – en bild märks aldrig med ett mål som kan ha bytts.
+  function session.shotTargetNote()
+    local rec, refused = unitRec("target")
+    if rec then
+      session.shotLastTarget, session.shotTargetStale = rec, false
+    elseif refused then
+      session.shotLastTarget, session.shotTargetStale = nil, true
+    else
+      session.shotLastTarget, session.shotTargetStale = nil, false
+    end
   end
 
   -- Vad bilden föreställer: posten (k, id, n) eller nil och skälet ("player" = bara spelare/husdjur fanns, "none").
@@ -2464,7 +2494,7 @@ end
   --   3. det muspekaren pekade på för högst 3 s sedan (man klickar på en makroknapp: pekaren har lämnat målet)
   --   4. det markerade målet              5. objektet muspekaren senast pekade på (högst 15 s sedan)
   function session.shotTarget()
-    local rec, r1 = unitRec("mouseover")
+    local rec, r1, h1 = unitRec("mouseover")
     if rec then return rec end
     local obj = session.shotObject()
     if obj then return obj end
@@ -2472,12 +2502,18 @@ end
     local t = num(try(GetTime)) or 0
     local age = type(seen) == "table" and t - (seen.at or 0) or nil
     if age and age <= 3 then return { k = seen.k or "object", id = seen.id, n = seen.n } end
-    local tar, r2 = unitRec("target")
+    local tar, r2, h2 = unitRec("target")
     if tar then return tar end
+    -- målet går inte att läsa just nu, men det är samma mål som när det markerades: använd det addonen såg då
+    if h2 and not session.shotTargetStale and type(session.shotLastTarget) == "table" then
+      local l = session.shotLastTarget
+      return { k = "npc", id = l.id, n = l.n }
+    end
     if age and age <= 15 and (seen.k or "object") == "object" then return { k = "object", id = seen.id, n = seen.n } end
     if type(db) == "table" and type(session.shotWhy) == "table" then
-      session.diag({ last = string.sub("shot none: " .. table.concat(session.shotWhy, " "), 1, 300) })
+      session.diag({ last = string.sub("shot none: " .. unitWhy("target") .. " " .. unitWhy("mouseover") .. " stale=" .. tostring(session.shotTargetStale) .. " " .. table.concat(session.shotWhy, " "), 1, 300) })
     end
+    if h1 or h2 then return nil, "hidden" end
     return nil, (r1 or r2) and "player" or "none"
   end
 
@@ -2541,7 +2577,7 @@ end
       session.shotDone(old, nil)
     end
     local rec, why = session.shotTarget()
-    if not rec then say(why == "player" and L.shot_player or L.shot_none); return end
+    if not rec then say(why == "hidden" and (L.shot_hidden or L.shot_none) or why == "player" and L.shot_player or L.shot_none); return end
     if type(Screenshot) ~= "function" then say(L.shot_failed); return end
     rec.m, rec.x, rec.y = playerPos()   -- spelarens egen position; ingen i instanser, under flygtur eller i fordon
     local p = { rec = rec, at = t, to = session.replyTo }
@@ -2674,7 +2710,7 @@ local handlers = {
   TAXIMAP_OPENED = onTaxiMapOpened,
   BANKFRAME_OPENED = function() noteUnit("npc", nil) end,
   -- 1.0.4: mobs you only look at, mailboxes and service NPCs (auction house, stable, spirit healer).
-  PLAYER_TARGET_CHANGED = function() noteMob("target"); watchTarget() end,
+  PLAYER_TARGET_CHANGED = function() noteMob("target"); watchTarget(); pcall(session.shotTargetNote) end,
   UPDATE_MOUSEOVER_UNIT = function() noteMob("mouseover"); pcall(session.shotNoteUnit) end,
   MAIL_SHOW = onMailShow,
   AUCTION_HOUSE_SHOW = function() noteUnit("npc", { auction = true }) end,

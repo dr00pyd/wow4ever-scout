@@ -54,7 +54,7 @@ internal sealed class ScoutController : IDisposable
         _lifetime = lifetime;
         Settings = settings;
         Api = api;
-        _uploader = new Uploader(api, settings);
+        _uploader = new Uploader(api, settings) { ShotEncoder = new SkiaShotEncoder() }; // 1.0.17: bilder tagna med /scout bild
 
         // Menyradsikonen: lägerelden som mallbild (följer ljust/mörkt läge), i färg vid uppladdning och fel.
 #if LINUX
@@ -419,6 +419,7 @@ internal sealed class ScoutController : IDisposable
         if (report.FilesUploaded > 0) Log(TF("journal.uploaded", now, report.FilesUploaded) + " – " + Humor(), Look.Ok);
         if (report.HotfixStored > 0) Log(TF("journal.hotfix", now), Look.Ok);
         if (report.CreatureCacheStored > 0) Log(TF("journal.creaturecache", now, report.CreatureCount), Look.Ok);
+        if (report.ShotsUploaded > 0) Log(TF("journal.shots", now, report.ShotsUploaded), Look.Ok);
         if (report.AuctionRows > 0) Log(TF("journal.auctions", now, report.AuctionRows), Look.Ok);
         if (report.NothingToDo && !quietIfNothing) Log(TF("journal.nothing", now), Look.Muted);
         if (report.FilesUploaded > 0 || report.HotfixStored > 0) _window?.Flash(TF("done", report.FilesUploaded, report.HotfixStored));
