@@ -1,0 +1,6 @@
+<Bindings>
+  <!-- 1.0.20: ett knapptryck = en bild av målet (samma som /scout bild). Namnen sätts i ForeverScout.lua. -->
+  <Binding name="FOREVERSCOUT_SHOT" header="FOREVERSCOUT" category="ADDONS">
+    ForeverScout_Shot()
+  </Binding>
+</Bindings>

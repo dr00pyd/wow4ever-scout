@@ -1,0 +1,84 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Store: Windows-API:erna för MSIX (StartupTask, aktiveringen) kräver en versionsangiven Windows-TFM. -->
+    <TargetFramework Condition="'$(ScoutVariant)' == 'store'">net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion Condition="'$(ScoutVariant)' == 'store'">10.0.17763.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>ForeverScout</RootNamespace>
+    <AssemblyName>ForeverScout</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <!-- Egenritade kontroller används bara i kod, aldrig i designern. -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+
+    <!-- Versionsinfo i exe:n (minskar AV-falsklarm). -->
+    <Version>1.0.17</Version>
+    <FileVersion>1.0.17.0</FileVersion>
+    <AssemblyVersion>1.0.17.0</AssemblyVersion>
+    <Company>Forever-guiden (guide.wow4ever.se)</Company>
+    <Product>Forever Scout</Product>
+    <AssemblyTitle>Forever Scout</AssemblyTitle>
+    <Description>Forever Scout - laddar upp addon-data till Forever-guiden</Description>
+    <Copyright>Forever-guiden 2026</Copyright>
+    <NeutralLanguage>sv-SE</NeutralLanguage>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
+    <!-- Publicering: self-contained single-file win-x64 UTAN komprimering (EnableCompressionInSingleFile liknar en packer
+         och ger AV-falsklarm), inga packers, ingen trimning, ingen obfuskering. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <SelfContained Condition="'$(ScoutVariant)' == 'lite'">false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>embedded</DebugType>
+    <SatelliteResourceLanguages>sv;en</SatelliteResourceLanguages>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <DefineConstants Condition="'$(ScoutVariant)' == 'lite'">$(DefineConstants);SCOUT_LITE</DefineConstants>
+    <DefineConstants Condition="'$(ScoutVariant)' == 'store'">$(DefineConstants);SCOUT_STORE</DefineConstants>
+    <!-- Lite: saknas .NET 10 Desktop Runtime visar apphosten Windows standarddialog med nedladdningslänk. -->
+    <RollForward Condition="'$(ScoutVariant)' == 'lite'">LatestMinor</RollForward>
+  </PropertyGroup>
+
+  <!-- Minne (1.0.11): globalisering via Windows egna NLS i stället för ICU – samma sv/en-formatering, icu.dll laddas
+       inte (uppmätt −2,4 MB arbetsmängd). Kan stängas av med -p:ScoutUseNls=false. System.GC.ConserveMemory och
+       ReadyToRun provades också: ingen vinst respektive +3 MB, därför inte med. -->
+  <PropertyGroup>
+    <ScoutUseNls Condition="'$(ScoutUseNls)' == ''">true</ScoutUseNls>
+  </PropertyGroup>
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.Globalization.UseNls" Value="true" Condition="'$(ScoutUseNls)' == 'true'" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ForeverScout.Core\ForeverScout.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForeverScout.Tests" />
+  </ItemGroup>
+
+  <!-- Logotyp och fältikoner (genereras av tools/make-icons.mjs). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\*.png" LogicalName="res/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="app.ico" LogicalName="res/app.ico" />
+  </ItemGroup>
+
+  <!-- Addonen paketeras som den ser ut vid bygget (client/addon/ForeverScout/**). -->
+  <PropertyGroup>
+    <AddonDir>$(MSBuildThisFileDirectory)..\..\..\addon\ForeverScout\</AddonDir>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(AddonDir)')">
+    <EmbeddedResource Include="$(AddonDir)**\*" Exclude="$(AddonDir)**\.git*">
+      <LogicalName>addon/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

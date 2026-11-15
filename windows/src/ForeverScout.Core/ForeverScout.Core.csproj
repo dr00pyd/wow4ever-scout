@@ -1,0 +1,39 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net10.0-windows: Windows-klienten (oförändrad). net10.0: macOS-klienten (client/mac). Plattformsberoende delar
+         väljs vid körning med OperatingSystem.IsWindows()/IsMacOS(), se SafeFs.cs. -->
+    <TargetFrameworks>net10.0-windows;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ForeverScout.Core</RootNamespace>
+    <Company>Forever-guiden (guide.wow4ever.se)</Company>
+    <Product>Forever Scout</Product>
+    <Version>1.0.12</Version>
+    <DebugType>embedded</DebugType>
+    <DefineConstants Condition="'$(ScoutVariant)' == 'lite'">$(DefineConstants);SCOUT_LITE</DefineConstants>
+    <DefineConstants Condition="'$(ScoutVariant)' == 'store'">$(DefineConstants);SCOUT_STORE</DefineConstants>
+  </PropertyGroup>
+
+  <!--
+    Släppnyckeln: Release-bygget (= dotnet publish) avbryts så länge platshållaren står kvar i UpdateKeys.cs.
+    Debug-bygget (tester) varnar bara. -p:ScoutDevBuild=true ger ett utvecklingsbygge som bygger ändå –
+    det vägrar då alla uppdateringar, eftersom ingen nyckel finns. Släpp ALDRIG ett sådant bygge.
+  -->
+  <Target Name="ScoutKeyGuard" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_ScoutKeyText>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)UpdateKeys.cs'))</_ScoutKeyText>
+      <_ScoutKeyMissing>$(_ScoutKeyText.Contains('__SCOUT_PUBLIC_KEY_PLACEHOLDER__'))</_ScoutKeyMissing>
+    </PropertyGroup>
+    <Error Condition="'$(_ScoutKeyMissing)' == 'True' and '$(Configuration)' == 'Release' and '$(ScoutDevBuild)' != 'true'"
+           Text="UpdateKeys.cs har fortfarande platshållaren för släppnyckeln. Kör 'node scripts/scout-sign.mjs --genkey &lt;katalog&gt;' och klistra in den publika nyckeln (eller bygg med -p:ScoutDevBuild=true för ett utvecklingsbygge som vägrar alla uppdateringar)." />
+    <Warning Condition="'$(_ScoutKeyMissing)' == 'True' and ('$(Configuration)' != 'Release' or '$(ScoutDevBuild)' == 'true')"
+             Text="Utvecklingsbygge utan släppnyckel: klienten vägrar alla uppdateringar." />
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForeverScout.Tests" />
+    <InternalsVisibleTo Include="ForeverScout.Mac.Tests" />
+  </ItemGroup>
+
+</Project>
