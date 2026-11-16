@@ -14,7 +14,7 @@
 local ADDON, ns = ...
 ns = ns or {}
 
-local VERSION = "1.0.24"
+local VERSION = "1.0.25"
 local FORMAT = 1
 local MAX_SPOTS = 50          -- per NPC / object, oldest dropped
 local MAX_LOOT = 2000         -- loot entries, oldest dropped
@@ -2521,6 +2521,13 @@ end
   function session.shotNoteUnit()
     local rec = unitRec("mouseover")
     if rec then session.shotSeen = { k = "npc", id = rec.id, n = rec.n, at = num(try(GetTime)) or 0 } end
+    -- 1.0.25: klienter utan någon enhetskrok för tooltipen (se session.shotTipHook): raden läggs till en bildruta senare
+    if rec and not session.shotTipHooked then
+      later(0, function()
+        local tip = GameTooltip
+        if type(tip) == "table" and unitFlag(tip.IsShown, tip) == true then session.shotTip(tip, "mouseover") end
+      end)
+    end
   end
 
   -- Minns världsobjektet under muspekaren när spelets tooltip visas (bara namn och id, bara i minnet).
@@ -2531,6 +2538,83 @@ end
   if type(GameTooltip) == "table" and type(GameTooltip.HookScript) == "function" then
     pcall(GameTooltip.HookScript, GameTooltip, "OnShow", function() later(0, session.shotNote) end)
   end
+
+  -- 1.0.25: "guiden saknar bild av den här NPC:n" – en diskret rad i spelets tooltip, så att spelaren ser vilka
+  -- NPC:er som ännu ger 5 poäng för första bilden. Raden visas bara för en NPC som /scout bild skulle godta
+  -- (unitRec: aldrig spelare eller husdjur, aldrig när spelet döljer enhetens uppgifter), aldrig i strid, inte om
+  -- NPC:n finns i den medskickade listan över NPC:er som redan har bild (ForeverScoutShotList, ShotList.lua – fylls
+  -- av scripts/build-addon-shotlist.mjs vid släpp) och inte om spelaren redan fotat den (db.shots). Saknas listan
+  -- eller är den tom får varje godtagbar NPC raden. Stängs av med /scout tips (opt.tipsOff, per karaktär).
+  -- Listans id:n: en sträng med tal ("12,34,56", radbrytningar går bra) eller en tabell (lista eller mängd).
+  -- Strängen tolkas en gång, första gången den behövs – aldrig vid inladdningen.
+  local function shotHave()
+    local list = ForeverScoutShotList
+    local ids = type(list) == "table" and list.ids or nil
+    if session.shotHaveSrc ~= ids or type(session.shotHaveSet) ~= "table" then
+      local set = {}
+      if type(ids) == "string" then
+        for id in ids:gmatch("%d+") do set[tonumber(id)] = true end
+      elseif type(ids) == "table" then
+        for k, v in pairs(ids) do
+          if v == true then set[k] = true elseif type(v) == "number" then set[v] = true end
+        end
+      end
+      session.shotHaveSrc, session.shotHaveSet = ids, set
+    end
+    return session.shotHaveSet
+  end
+
+  -- Raden för enheten, eller nil när ingen rad ska visas.
+  function session.shotTipText(unit)
+    if type(db) ~= "table" or type(opt) ~= "table" or opt.tipsOff then return nil end
+    if inCombat() then return nil end             -- okänt räknas som strid
+    local rec = unitRec(unit)
+    if not rec or rec.k ~= "npc" or type(rec.id) ~= "number" then return nil end
+    if shotHave()[rec.id] then return nil end
+    if type(db.shots) == "table" then
+      for _, s in ipairs(db.shots) do
+        if type(s) == "table" and s.k == "npc" and s.id == rec.id then return nil end
+      end
+    end
+    return str(T().shot_tip)
+  end
+
+  -- Lägger raden i spelets tooltip (bara GameTooltip). true om en rad lades till. Enheten: den tooltipen själv anger
+  -- (GetUnit) om klienten lämnar ut den, annars muspekarens. Samma rad läggs aldrig till två gånger.
+  function session.shotTip(tip, unit)
+    if type(tip) ~= "table" or tip ~= GameTooltip or type(tip.AddLine) ~= "function" then return false end
+    if not unit and type(tip.GetUnit) == "function" then
+      local _, token = try(tip.GetUnit, tip)
+      unit = str(token)
+    end
+    local text = session.shotTipText(unit or "mouseover")
+    if not text then return false end
+    local n = type(tip.NumLines) == "function" and num(try(tip.NumLines, tip)) or 0
+    for i = 1, n do
+      local line = _G["GameTooltipTextLeft" .. i]
+      if type(line) == "table" and str(try(line.GetText, line)) == text then return false end
+    end
+    if not pcall(tip.AddLine, tip, text, 0.55, 0.68, 0.85) then return false end
+    if type(tip.Show) == "function" then pcall(tip.Show, tip) end   -- tooltipen räknar om sin höjd
+    return true
+  end
+
+  -- Kroken: nyare klienter har TooltipDataProcessor (enhetstooltip), äldre skriptet OnTooltipSetUnit. Finns ingen av
+  -- dem läggs raden till från UPDATE_MOUSEOVER_UNIT i stället (session.shotNoteUnit). Aldrig ett fel ut.
+  function session.shotTipHook()
+    local tip = GameTooltip
+    if session.shotTipHooked or type(tip) ~= "table" then return end
+    local function onUnit(t) pcall(session.shotTip, t) end
+    local types = type(Enum) == "table" and Enum.TooltipDataType or nil
+    local proc = TooltipDataProcessor
+    if type(proc) == "table" and type(proc.AddTooltipPostCall) == "function" and type(types) == "table" and types.Unit ~= nil then
+      if pcall(proc.AddTooltipPostCall, types.Unit, onUnit) then session.shotTipHooked = "data"; return end
+    end
+    if type(tip.HookScript) == "function" and pcall(tip.HookScript, tip, "OnTooltipSetUnit", onUnit) then
+      session.shotTipHooked = "script"
+    end
+  end
+  pcall(session.shotTipHook)
 
   -- Visar gränssnittet igen. Körs alltid först när en bild är klar, misslyckad eller för gammal; aldrig ett fel ut.
   function session.shotShow(p)
@@ -2651,6 +2735,10 @@ local function onSlash(msg)
     share(L, arg, cmd == "tipsa" and "sv" or "en")
   elseif cmd == "bild" or cmd == "shot" then
     ForeverScout_Shot()         -- 1.0.20: skärmbild av målet (samma som tangentbindningen)
+  elseif cmd == "tips" then
+    -- 1.0.25: raden "guiden saknar bild" i tooltipen (på som standard, per karaktär)
+    if arg == "on" then opt.tipsOff = nil elseif arg == "off" then opt.tipsOff = true else opt.tipsOff = not opt.tipsOff or nil end
+    say(opt.tipsOff and L.tips_off or L.tips_on)
   elseif cmd == "log" then
     -- 1.0.11: loggrader i chatten för testare (av som standard, per karaktär)
     if arg == "on" then opt.log = true elseif arg == "off" then opt.log = nil else opt.log = not opt.log or nil end

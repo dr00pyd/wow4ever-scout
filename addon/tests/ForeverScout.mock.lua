@@ -83,7 +83,7 @@ ForeverScoutDB = { seq = 7, objects = { [999001] = { n = "Old Chest" }, [999003]
 fire("ADDON_LOADED", "ForeverScout")
 local T = ns._test
 local db = T.db()
-check(db.addon == "1.0.24", "addonversion 1.0.24")
+check(db.addon == "1.0.25", "addonversion 1.0.25")
 check(db.objects[999001].q and db.objects[999001].q > 7 and db.npcs[999002].q and db.npcs[999002].q > 7, "1.0.10: gamla poster utan position får löpnummer vid start")
 check(db.objects[999003].q == nil, "1.0.10: poster med position behåller löpnumret i sina platser")
 check(type(db.mobs) == "table" and type(db.mail) == "table", "mobs och mail finns")
@@ -98,7 +98,7 @@ do
   check(frame.events.PLAYER_LOGIN, "händelsen registrerad: PLAYER_LOGIN")
   fire("PLAYER_LOGIN")
   DEFAULT_CHAT_FRAME.AddMessage = old
-  check(#said == 1 and said[1]:find("1.0.24", 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
+  check(#said == 1 and said[1]:find("1.0.25", 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
 end
 
 ---------------------------------------------------------------------------
@@ -1075,7 +1075,7 @@ do
   SlashCmdList.FOREVERSCOUT("")
   CreateFrame = oldCF
   DEFAULT_CHAT_FRAME.GetNumMessages, DEFAULT_CHAT_FRAME.GetMaxLines, DEFAULT_CHAT_FRAME.AddMessage = nil, nil, old
-  check(shown and txt and txt:find("1.0.24", 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
+  check(shown and txt and txt:find("1.0.25", 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
         "1.0.18: syns inte raden i chatten visas svaret i Forever Scout-fönstret (stängs med Esc)")
 end
 
@@ -1385,6 +1385,148 @@ do
   units.target = nil
   fire("PLAYER_TARGET_CHANGED")
   check(T.session.shotLastTarget == nil and T.session.shotTargetStale == false, "1.0.24: utan mål glöms minnet")
+
+  -- 1.0.25: raden "guiden saknar bild" i tooltipen för NPC:er som saknas i listan (ForeverScoutShotList)
+  do
+    local S = T.session
+    local lines, shows = {}, 0
+    GameTooltip.AddLine = function(_, text) lines[#lines + 1] = text end
+    GameTooltip.NumLines = function() return #lines end
+    GameTooltip.Show = function() shows = shows + 1 end
+    for i = 1, 6 do _G["GameTooltipTextLeft" .. i] = { GetText = function() return lines[i] end } end
+    local EN, SV = "No picture in the guide yet – /scout shot (+5 pts)", "Guiden saknar bild – /scout bild (+5 p)"
+    local function mob(id, name) return { guid = "Creature-0-1-2-3-" .. id .. "-000000000A", name = name or "Grimble", level = 20 } end
+    -- muspekaren över enheten och tooltipen visas: true om raden lades till
+    local function hover(unit) lines = {}; units.mouseover = unit; return S.shotTip(GameTooltip) end
+    timers = {}
+    combat, units.target = false, nil
+    check(#db.shots > 0 and db.shots[#db.shots].id == 1234, "1.0.25: (förutsättning) NPC 1234 är redan fotad i den här installationen")
+
+    ForeverScoutShotList = nil
+    check(hover(mob(7777)) == true and #lines == 1 and lines[1] == EN and shows == 1, "1.0.25: saknas listan helt får NPC:n raden (engelska)")
+    check(S.shotTip(GameTooltip) == false and #lines == 1, "1.0.25: samma rad läggs aldrig till två gånger i samma tooltip")
+    check(S.shotTip({ AddLine = GameTooltip.AddLine }) == false and #lines == 1, "1.0.25: bara spelets egen tooltip får raden")
+    ForeverScoutShotList = "trasig"
+    check(hover(mob(7777)) == true, "1.0.25: en lista som inte är en tabell räknas som saknad")
+
+    -- filen som följer med addonen (fylls vid släpp), och båda .toc-filerna laddar den före ForeverScout.lua
+    ForeverScoutShotList = nil
+    assert(loadfile(DIR .. "ShotList.lua"))()
+    check(type(ForeverScoutShotList) == "table" and type(ForeverScoutShotList.ids) == "string" and type(ForeverScoutShotList.built) == "string",
+          "1.0.25: ShotList.lua ger ForeverScoutShotList med id-sträng och built")
+    check(hover(mob(7777)) == true and lines[1] == EN, "1.0.25: tom lista – NPC:n får raden")
+    for _, toc in ipairs({ "ForeverScout.toc", "ForeverScout_Forever.toc" }) do
+      local f = io.open(DIR .. toc, "r")
+      local txt = f and f:read("*a") or ""
+      if f then f:close() end
+      local a, b = txt:find("\nShotList.lua", 1, true), txt:find("\nForeverScout.lua", 1, true)
+      check(a and b and a < b and txt:find("## Version: 1.0.25", 1, true), "1.0.25: " .. toc .. " har version 1.0.25 och laddar ShotList.lua före ForeverScout.lua")
+    end
+
+    -- NPC:n finns i listan: ingen rad. Id:n jämförs som hela tal (777 är inte 7777).
+    ForeverScoutShotList = { built = "2026-11-16", ids = "12,7777,\n9000" }
+    check(hover(mob(7777)) == false and #lines == 0, "1.0.25: NPC i listan får ingen rad")
+    check(hover(mob(777)) == true and hover(mob(9000)) == false and hover(mob(12)) == false, "1.0.25: listans id:n är hela tal, radbrytningar i strängen går bra")
+    ForeverScoutShotList = { built = "2026-11-17", ids = "12,9000" }
+    check(hover(mob(7777)) == true, "1.0.25: en ny lista läses om")
+    ForeverScoutShotList = { ids = { 12, 7777 } }
+    check(hover(mob(7777)) == false and hover(mob(1)) == true, "1.0.25: listan får vara en tabell med id:n")
+    ForeverScoutShotList = { ids = { [7777] = true } }
+    check(hover(mob(7777)) == false and hover(mob(12)) == true, "1.0.25: listan får vara en mängd")
+    ForeverScoutShotList = { built = "", ids = "" }
+
+    -- redan fotad av spelaren, spelare, husdjur, strid, dolda uppgifter
+    check(hover(mob(1234, "Lars")) == false and #lines == 0, "1.0.25: NPC som spelaren redan fotat får ingen rad")
+    check(hover({ guid = "Player-1-0000ABCD", name = "Bob", isPlayer = true, controlled = true }) == false and #lines == 0, "1.0.25: spelare får aldrig raden")
+    local pet = mob(7778, "Fluffy"); pet.controlled = true
+    check(hover(pet) == false and #lines == 0, "1.0.25: husdjur får aldrig raden")
+    check(hover(nil) == false and #lines == 0, "1.0.25: ingen enhet under muspekaren – ingen rad")
+    combat = true
+    check(hover(mob(7777)) == false and #lines == 0, "1.0.25: aldrig i strid")
+    combat = false
+    local realSecret = issecretvalue
+    issecretvalue = function() return true end
+    check(hover(mob(7777)) == false and #lines == 0, "1.0.25: dolda uppgifter (hemliga värden) – ingen rad")
+    issecretvalue = realSecret
+    local realLockdown = InCombatLockdown
+    InCombatLockdown = function() return SECRET end
+    check(hover(mob(7777)) == false and #lines == 0, "1.0.25: okänt stridsläge räknas som strid")
+    InCombatLockdown = realLockdown
+    GameTooltip.AddLine = function() error("AddLine gick inte") end
+    check(hover(mob(7777)) == false, "1.0.25: ett fel i tooltipen stannar i addonen")
+    GameTooltip.AddLine = function(_, text) lines[#lines + 1] = text end
+
+    -- tooltipen anger själv vilken enhet den visar (GetUnit): den går före muspekaren
+    units.target = mob(1234, "Lars")
+    GameTooltip.GetUnit = function() return "Lars", "target" end
+    check(hover(mob(7777)) == false and #lines == 0, "1.0.25: tooltipens egen enhet (GetUnit) avgör, inte muspekaren")
+    GameTooltip.GetUnit = function() return nil end
+    units.target = nil
+
+    -- svenska
+    ForeverScoutOpt.lang = "sv"
+    check(hover(mob(7777)) == true and lines[1] == SV, "1.0.25: raden på svenska")
+    ForeverScoutOpt.lang = nil
+
+    -- /scout tips slår av och på (på som standard), och står i hjälpen på båda språken
+    check(ForeverScoutOpt.tipsOff == nil, "1.0.25: bildtipsen är på som standard")
+    SlashCmdList.FOREVERSCOUT("tips")
+    check(ForeverScoutOpt.tipsOff == true and last():find("Picture tips are OFF", 1, true), "1.0.25: /scout tips stänger av och säger det")
+    check(hover(mob(7777)) == false and #lines == 0, "1.0.25: avstängt – ingen rad")
+    SlashCmdList.FOREVERSCOUT("tips")
+    check(ForeverScoutOpt.tipsOff == nil and last():find("Picture tips are ON", 1, true), "1.0.25: /scout tips slår på igen och säger det")
+    check(hover(mob(7777)) == true, "1.0.25: påslaget – raden visas igen")
+    SlashCmdList.FOREVERSCOUT("tips off")
+    check(ForeverScoutOpt.tipsOff == true and hover(mob(7777)) == false, "1.0.25: /scout tips off")
+    SlashCmdList.FOREVERSCOUT("tips off")
+    check(ForeverScoutOpt.tipsOff == true, "1.0.25: /scout tips off två gånger är fortfarande av")
+    SlashCmdList.FOREVERSCOUT("tips on")
+    check(ForeverScoutOpt.tipsOff == nil and hover(mob(7777)) == true, "1.0.25: /scout tips on")
+    for _, lang in ipairs({ "en", "sv" }) do
+      ForeverScoutOpt.lang = lang
+      local from, found = #said, false
+      SlashCmdList.FOREVERSCOUT("help")
+      for i = from + 1, #said do if said[i]:find("/scout tips on|off", 1, true) then found = true end end
+      check(found, "1.0.25: /scout tips står i hjälpen (" .. lang .. ")")
+      check(type(ns.texts[lang].shot_tip) == "string" and type(ns.texts[lang].tips_on) == "string" and type(ns.texts[lang].tips_off) == "string", "1.0.25: texterna finns (" .. lang .. ")")
+    end
+    ForeverScoutOpt.lang = nil
+
+    -- krokarna: OnTooltipSetUnit (äldre klienter), TooltipDataProcessor (nyare), annars UPDATE_MOUSEOVER_UNIT
+    local hooks, post = {}, {}
+    GameTooltip.HookScript = function(_, script, fn) hooks[script] = fn end
+    S.shotTipHooked = nil
+    S.shotTipHook()
+    check(S.shotTipHooked == "script" and type(hooks.OnTooltipSetUnit) == "function", "1.0.25: kroken OnTooltipSetUnit sätts")
+    lines, units.mouseover = {}, mob(7777)
+    hooks.OnTooltipSetUnit(GameTooltip)
+    check(#lines == 1 and lines[1] == EN, "1.0.25: OnTooltipSetUnit lägger till raden")
+    Enum.TooltipDataType = { Unit = 2 }
+    TooltipDataProcessor = { AddTooltipPostCall = function(ty, fn) post[ty] = fn end }
+    S.shotTipHooked, hooks = nil, {}
+    S.shotTipHook()
+    check(S.shotTipHooked == "data" and type(post[2]) == "function" and hooks.OnTooltipSetUnit == nil, "1.0.25: finns TooltipDataProcessor används bara den")
+    lines = {}
+    post[2]({ AddLine = GameTooltip.AddLine }, {})
+    check(#lines == 0, "1.0.25: andra tooltipar än spelets egen lämnas i fred")
+    post[2](GameTooltip, {})
+    check(#lines == 1 and lines[1] == EN, "1.0.25: TooltipDataProcessor lägger till raden")
+    Enum.TooltipDataType, TooltipDataProcessor = nil, nil
+    GameTooltip.HookScript = function() error("skriptet finns inte") end
+    S.shotTipHooked = nil
+    S.shotTipHook()
+    check(S.shotTipHooked == nil, "1.0.25: går ingen krok att sätta blir det inget fel")
+    lines, timers, tip.shown = {}, {}, true
+    fire("UPDATE_MOUSEOVER_UNIT"); run(0)
+    check(#lines == 1 and lines[1] == EN, "1.0.25: utan krok läggs raden till från UPDATE_MOUSEOVER_UNIT")
+    lines, tip.shown = {}, false
+    fire("UPDATE_MOUSEOVER_UNIT"); run(0)
+    check(#lines == 0, "1.0.25: utan krok och utan synlig tooltip läggs ingen rad till")
+
+    ForeverScoutShotList = nil
+    units.mouseover, T.session.shotSeen = nil, nil
+    for i = 2, 6 do _G["GameTooltipTextLeft" .. i] = nil end
+  end
   check(T.session.errors == errors0, "1.0.20 utan fångade fel (" .. tostring(T.session.lastError) .. ")")
 
   units.target, units.mouseover = nil, nil
