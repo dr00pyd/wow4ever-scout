@@ -22,6 +22,7 @@ internal static class Program
         bool restarted = args.Contains("--restarted");
         var settings = Settings.Load();
         Strings.Apply(settings.Language);
+        ShowInDock = settings.ShowInDock; // 1.0.19
         _ = SafeFs.OwnBundle; // läses en gång, före ett eventuellt paketbyte
 
         string? message = null;
@@ -53,10 +54,16 @@ internal static class Program
         return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
     }
 
-    /// <summary>Menyradsapp: ingen Dock-ikon (Info.plist har också LSUIElement=true).</summary>
+    /// <summary>
+    /// 1.0.19: Dock-ikonen (Inställningar, på som standard). Info.plist har LSUIElement=true (ingen Dock-ikon från
+    /// start); med den här på sätter Avalonia appen till en vanlig app med ikon i Dock och menyrad. Av = bara menyraden,
+    /// som före 1.0.19.
+    /// </summary>
+    internal static bool ShowInDock { get; set; }
+
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
-            .With(new MacOSPlatformOptions { ShowInDock = false })
+            .With(new MacOSPlatformOptions { ShowInDock = ShowInDock })
             .LogToTrace();
 }

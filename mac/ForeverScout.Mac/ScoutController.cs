@@ -181,6 +181,8 @@ internal sealed class ScoutController : IDisposable
     {
         _gameRoot = null;
         SafeFs.AuctionFilesAllowed = Settings.ShareAuctionPrices; // av som standard: då nekas auktionsaddonernas filer
+        SafeFs.ShotCleanAllowed = Settings.CleanUploadedShots;     // 1.0.19: av som standard: då raderas aldrig något
+        _gameDirTriedAt = DateTime.UtcNow;
         try
         {
             if (!string.IsNullOrEmpty(Settings.GameDir) && Settings.IsGameDirConfirmed() && WowLocator.IsUsableGameDir(Settings.GameDir))
@@ -359,6 +361,8 @@ internal sealed class ScoutController : IDisposable
             Settings.AcceptedTotal = me.AcceptedTotal();
             Settings.ConfirmedTotal = me.Confirmed;
             Overview.Apply(Settings, me); // 1.0.18: poäng som väntar på bekräftelse och spelarens bilder (valfria fält)
+            // 1.0.19: meddelande från guiden till just den här spelaren – en gång per meddelande.
+            if (PlayerMessages.Take(Settings, me) is { } message) Log(TF("message.from", message), Look.Gold);
             if (me.Recent is { Count: > 0 } recent && Settings.LastConfirmed.Count == 0)
                 Settings.LastConfirmed = recent.Select(ToConfirmed).OfType<ConfirmedItem>().Take(5).ToList();
             Settings.Save();
@@ -434,14 +438,50 @@ internal sealed class ScoutController : IDisposable
         _miPause.IsChecked = Settings.AutoUploadPaused;
     }
 
+    /// <summary>1.0.19: senaste försöket att nå den valda spelkatalogen (<see cref="GameDirRetry"/>).</summary>
+    private DateTime _gameDirTriedAt = DateTime.MinValue;
+    private bool _shotListBusy;
+
+    /// <summary>
+    /// 1.0.19: den valda spelkatalogen fanns inte vid start (extern disk, en volym som monteras efter inloggning) –
+    /// pröva igen en gång i minuten. När den går att nå startar addonen, statistiken och bevakningen.
+    /// </summary>
+    private void RetryGameDir()
+    {
+        if (!GameDirRetry.Due(Settings, CurrentDir is not null, _gameDirTriedAt, DateTime.UtcNow)) return;
+        ApplyGameDir();
+        if (CurrentDir is null) return;
+        Log(TF("journal.line", Strings.When(DateTime.UtcNow), T("gamedir.back")), Look.Ok);
+        InstallBundledAddonIfNeeded();
+        RefreshStats(force: true);
+        UpdateStatus();
+        WatchGame();
+        _sync.Notify();
+    }
+
+    /// <summary>1.0.19: daglig bildlista till addonen (<see cref="ShotListFile"/>) – högst en gång per 20 timmar.</summary>
+    private async Task RefreshShotList()
+    {
+        if (_shotListBusy || CurrentDir is not { } dir) return;
+        _shotListBusy = true;
+        try
+        {
+            if (await ShotListFile.RefreshAsync(Api, dir, Settings, DateTime.UtcNow) is int n)
+                Log(TF("journal.line", Strings.When(DateTime.UtcNow), TF("shotlist.done", n)), Look.Muted);
+        }
+        finally { _shotListBusy = false; }
+    }
+
     private void OnTick()
     {
+        RetryGameDir();
         RefreshStats(force: false);
         UpdateStatus();
         WatchGame();
         if (_uploader.RetryDue && AutoUploadActive) _sync.Notify();
         if (DateTime.UtcNow - _meAt > MeEvery) _ = RefreshMe();
         if (DateTime.UtcNow - _versionAt > VersionEvery) _ = CheckUpdates(interactive: false);
+        _ = RefreshShotList();
     }
 
     // ------------------------------------------------------------------ uppladdning
@@ -465,6 +505,7 @@ internal sealed class ScoutController : IDisposable
         if (report.HotfixStored > 0) Log(TF("journal.hotfix", now), Look.Ok);
         if (report.CreatureCacheStored > 0) Log(TF("journal.creaturecache", now, report.CreatureCount), Look.Ok);
         if (report.ShotsUploaded > 0) Log(TF("journal.shots", now, report.ShotsUploaded), Look.Ok);
+        if (report.ShotsCleaned > 0) Log(TF("journal.line", now, TF("shotclean.done", report.ShotsCleaned)), Look.Muted);
         if (report.AuctionRows > 0) Log(TF("journal.auctions", now, report.AuctionRows), Look.Ok);
         if (report.NothingToDo && !quietIfNothing) Log(TF("journal.nothing", now), Look.Muted);
         if (report.FilesUploaded > 0 || report.HotfixStored > 0) _window?.Flash(TF("done", report.FilesUploaded, report.HotfixStored));
@@ -533,6 +574,7 @@ internal sealed class ScoutController : IDisposable
             // L10: signature2 krävs (ReleaseVerifier) och "issued" får inte vara äldre än den senaste vi sett.
             var release = Settings.AcceptRelease(await Api.VersionAsync(Settings.TrustedKeys, Settings.Beta), Settings.Beta);
             Settings.BlockedAddons = release.BlockedAddons.ToList();
+            Features.Apply(Settings, release); // 1.0.19: funktioner som guiden har stängt av (signerat fält "off")
             Settings.Save();
             Announce(release);
             await UpdateAddon(release, interactive, announceBlocked: false, alsoBlocked: null);
@@ -779,13 +821,15 @@ internal sealed class ScoutController : IDisposable
             var oldLang = Settings.Language;
             var oldAuction = Settings.ShareAuctionPrices;
             var oldBeta = Settings.Beta;
+            var oldDock = Settings.ShowInDock;
             var f = new SettingsWindow(Settings, pickDir, LinkWithBrowser);
             var closed = new TaskCompletionSource();
             f.Closed += (_, _) => closed.TrySetResult();
             if (_window is { IsVisible: true }) await f.ShowDialog(_window);
             else { f.Show(); f.Activate(); await closed.Task; }
             if (!f.Saved) return;
-            if (f.Unlinked || oldLang != Settings.Language) { Restart(); return; }
+            // 1.0.19: Dock-ikonen sätts när appen startar – byt genom att starta om (som språket).
+            if (f.Unlinked || oldLang != Settings.Language || oldDock != Settings.ShowInDock) { Restart(); return; }
             ApplyGameDir();
             if (Settings.ShareAuctionPrices && !oldAuction) _sync.Notify(); // nyss påslaget: dela det som redan finns
             InstallBundledAddonIfNeeded();

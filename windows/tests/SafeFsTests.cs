@@ -423,6 +423,7 @@ public class StaticGuardTests
     }
 
     [Fact]
-    public void UserAgentIsOnlyProductAndVersion() =>
-        Assert.Matches(@"^ForeverScout/\d+\.\d+\.\d+$", ApiClient.UserAgent);
+    // 1.0.19: produkt, version, plattform och variant – inget annat om datorn (servern: lib/scout/release.ts CLIENT_UA).
+    public void UserAgentIsOnlyProductVersionPlatformAndVariant() =>
+        Assert.Matches(@"^ForeverScout/\d+\.\d+\.\d+ \((windows|mac|linux); (full|lite|store)\)$", ApiClient.UserAgent);
 }

@@ -24,6 +24,8 @@ public sealed class SyncReport
     public int AuctionRows { get; set; }
     /// <summary>1.0.15: bilder (tagna med /scout bild) som servern tog emot i den här körningen (publicerade eller i granskningskön).</summary>
     public int ShotsUploaded { get; set; }
+    /// <summary>1.0.19: skickade bilder som raderades från datorn (<see cref="ShotCleaner"/>, bara när inställningen är på).</summary>
+    public int ShotsCleaned { get; set; }
     public List<ConfirmedItem> NewConfirmed { get; } = new();
     /// <summary>Fel som ska visas (översätts med <see cref="Strings.Error"/>).</summary>
     public Exception? Error { get; set; }
@@ -84,6 +86,7 @@ public sealed class Uploader(ApiClient api, Settings settings)
     public async Task<SyncReport> SyncAsync(GameDir dir, bool force, CancellationToken ct = default)
     {
         var report = new SyncReport();
+        bool? tipsSeen = null; // 1.0.19: vill någon av de skickade filerna ha bildtipsen?
         await _gate.WaitAsync(ct);
         try
         {
@@ -160,7 +163,9 @@ public sealed class Uploader(ApiClient api, Settings settings)
                 }
                 // 1.0.15: bildposterna (/scout bild) ur samma fil läggs i kön först när filen är mottagen – servern godtar
                 // bara en bild vars kod finns i bidragsgivarens uppladdade data.
-                if (settings.UploadShots && ShotEncoder is not null) Shots.Queue(settings, peek.Shots, addonVersion);
+                if (settings.ShotsOn && ShotEncoder is not null) Shots.Queue(settings, peek.Shots, addonVersion);
+                // 1.0.19: addonen 1.0.30 speglar /scout tips i kontots fil – av i alla skickade filer = ingen bildlista.
+                tipsSeen = tipsSeen is null ? !peek.TipsOff : tipsSeen.Value || !peek.TipsOff;
                 settings.LastUploadUtc = DateTime.UtcNow;
                 settings.Save();
             }
@@ -172,7 +177,13 @@ public sealed class Uploader(ApiClient api, Settings settings)
                 UploadLog.Append("ladda-upp", 0, "", "skipped:" + ((ScoutException)ex).Code);
             }
 
-            if (settings.UploadHotfix)
+            if (tipsSeen is bool wanted && settings.ShotListWanted != wanted)
+            {
+                settings.ShotListWanted = wanted;
+                try { settings.Save(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SafeFsException) { }
+            }
+
+            if (settings.HotfixOn)
                 foreach (var file in WowLocator.HotfixFiles(dir))
                 try
                 {
@@ -204,7 +215,7 @@ public sealed class Uploader(ApiClient api, Settings settings)
 
             // 1.0.14: spelets varelsecache (Cache\WDB\<locale>\creaturecache.wdb) – som hotfix-cachen: bara när rutan är
             // ikryssad (på som standard) och bara när filen ändrats sedan den senast skickades (sha256).
-            if (settings.UploadCreatureCache)
+            if (settings.CreatureCacheOn)
                 foreach (var file in WowLocator.CreatureCacheFiles(dir))
                 try
                 {
@@ -234,10 +245,10 @@ public sealed class Uploader(ApiClient api, Settings settings)
 
             // 1.0.15: bilder tagna med /scout bild – bara när rutan är ikryssad (på som standard) och bara de filer som en
             // post i addonens fil pekar ut.
-            if (settings.UploadShots && ShotEncoder is { } encoder)
+            if (settings.ShotsOn && ShotEncoder is { } encoder)
                 await SyncShotsAsync(dir, encoder, report, ct);
 
-            if (settings.ShareAuctionPrices && SafeFs.AuctionFilesAllowed)
+            if (settings.AuctionsOn && SafeFs.AuctionFilesAllowed)
                 await SyncAuctionsAsync(dir, report, ct);
 
             // Inga nätfel: nollställ backoff-kön (ett avvisat svar är inte ett nätfel och schemalägger inget).
@@ -347,6 +358,8 @@ public sealed class Uploader(ApiClient api, Settings settings)
                 UploadLog.Append("bild", jpeg.Length, img.Sha, $"ok {code} {outcome} {st.K}" + (st.Id is long id ? ":" + id : ""));
                 st.Finish(outcome, fileName);
                 if (outcome != "duplicate") report.ShotsUploaded++;
+                // 1.0.19: valfri städning (av som standard) – bara filen som servern just tog emot.
+                if (ShotCleaner.ShouldClean(settings, outcome) && ShotCleaner.Clean(path, code)) report.ShotsCleaned++;
                 dirty = false;
                 settings.Save();
             }
@@ -441,6 +454,8 @@ public sealed class Uploader(ApiClient api, Settings settings)
 
     public readonly record struct PeekResult(bool Complete, bool OnlyOurs, string? Addon, long? Seq)
     {
+        /// <summary>1.0.19: <c>tipsOff = true</c> i filen (addonen 1.0.30: /scout tips är avstängt).</summary>
+        public bool TipsOff { get; init; }
         /// <summary>1.0.15: bildposterna (<c>shots</c>) i filen, eller null om filen inte gick att läsa.</summary>
         public IReadOnlyList<ShotRecord>? Shots { get; init; }
     }
@@ -455,6 +470,6 @@ public sealed class Uploader(ApiClient api, Settings settings)
         try { g = LuaParser.ParseGlobals(bytes); }
         catch (LuaParseException) { return new(false, false, null, null); }
         if (!g.TryGetValue("ForeverScoutDB", out var v) || v is not LuaTable t) return new(g.Count > 0, false, null, null);
-        return new(true, g.Count == 1, t.Str("addon"), t.Int("seq")) { Shots = ShotRecord.Read(t) };
+        return new(true, g.Count == 1, t.Str("addon"), t.Int("seq")) { Shots = ShotRecord.Read(t), TipsOff = t["tipsOff"] is true };
     }
 }

@@ -160,6 +160,33 @@ public sealed class Settings
     /// <summary>L11: en automatiskt hittad katalog som användaren svarat Nej på – den föreslås inte igen.</summary>
     public string? GameDirDeclined { get; set; }
 
+    /// <summary>1.0.19: avstängda funktioner ur den senaste godtagna versionsinfon (<see cref="Features"/>).</summary>
+    public List<string> FeaturesOff { get; set; } = new();
+    /// <summary>1.0.19: högsta meddelande-id som visats (<see cref="PlayerMessages"/>).</summary>
+    public long? MessageSeen { get; set; }
+    /// <summary>1.0.19: "Ta bort skickade /scout bild-bilder från datorn" – av som standard (<see cref="ShotCleaner"/>).</summary>
+    public bool CleanUploadedShots { get; set; }
+    /// <summary>1.0.19: vill addonen ha bildlistan? Från kontots fil (addonen 1.0.30 speglar /scout tips i <c>tipsOff</c>):
+    /// false = tipsen är avstängda, då hämtas ingen lista. Null = okänt (äldre addon) – listan hämtas.</summary>
+    public bool? ShotListWanted { get; set; }
+    /// <summary>1.0.19: när bildlistan senast hämtades (eller försöktes hämtas).</summary>
+    public DateTime? ShotListAtUtc { get; set; }
+    /// <summary>1.0.19, macOS: visa appen i Dock (på som standard) – menyradsikonen kan hamna bakom kameraskåran eller
+    /// döljas av macOS, och då syns inte att appen körs. Gäller efter omstart av appen.</summary>
+    public bool ShowInDock { get; set; } = true;
+
+    /// <summary>
+    /// 1.0.19: fält som den här versionen inte känner till (skrivna av en nyare version) behålls när filen sparas –
+    /// förr försvann de om man gick tillbaka till en äldre version och sedan uppdaterade igen.
+    /// </summary>
+    [JsonExtensionData] public Dictionary<string, JsonElement>? Unknown { get; set; }
+
+    /// <summary>Uppladdning av hotfix-cachen: inställningen och inte avstängd av guiden.</summary>
+    [JsonIgnore] public bool HotfixOn => UploadHotfix && Features.On(this, Features.Hotfix);
+    [JsonIgnore] public bool CreatureCacheOn => UploadCreatureCache && Features.On(this, Features.Creatures);
+    [JsonIgnore] public bool ShotsOn => UploadShots && Features.On(this, Features.Shots);
+    [JsonIgnore] public bool AuctionsOn => ShareAuctionPrices && Features.On(this, Features.Auctions);
+
     [JsonIgnore] public string FilePath { get; private set; } = "";
 
     /// <summary>Är den sparade spelkatalogen vald eller bekräftad av användaren?</summary>
@@ -250,9 +277,9 @@ public sealed class Settings
     {
         if (dir != null) SafeFs.UseAppDataDir(dir);
         var path = Path.Combine(DataDir, "settings.json");
-        Settings s;
-        try { s = SafeFs.FileExists(path) ? JsonSerializer.Deserialize<Settings>(SafeFs.ReadAllText(path), Json) ?? new() : new(); }
-        catch (Exception ex) when (ex is JsonException or IOException or SafeFsException or NotSupportedException) { s = new(); }
+        // 1.0.19: en trasig settings.json (strömavbrott mitt i en sparning, disken full) betydde förr att ALLT glömdes –
+        // spelkatalogen, vad som redan skickats, bildposterna. Nu läses den senaste goda kopian (settings.json.bak).
+        Settings s = TryRead(path) ?? TryRead(path + ".bak") ?? new();
         s.UploadedSeq = new(s.UploadedSeq, StringComparer.OrdinalIgnoreCase);
         s.HotfixSha = new(s.HotfixSha, StringComparer.OrdinalIgnoreCase);
         s.CreatureCacheSha = new(s.CreatureCacheSha ?? new(), StringComparer.OrdinalIgnoreCase);
@@ -262,6 +289,12 @@ public sealed class Settings
         s.AuctionDay = new(s.AuctionDay ?? new(), StringComparer.OrdinalIgnoreCase);
         s.FilePath = path;
         return s;
+    }
+
+    private static Settings? TryRead(string path)
+    {
+        try { return SafeFs.FileExists(path) ? JsonSerializer.Deserialize<Settings>(SafeFs.ReadAllText(path), Json) : null; }
+        catch (Exception ex) when (ex is JsonException or IOException or SafeFsException or NotSupportedException) { return null; }
     }
 
     private readonly object _lock = new();
@@ -278,6 +311,12 @@ public sealed class Settings
                 try { json = JsonSerializer.Serialize(this, Json); break; }
                 catch (InvalidOperationException) when (attempt < 4) { Thread.Sleep(15); }
             }
+            // 1.0.19: den förra filen blir settings.json.bak om den går att läsa – så finns alltid en god kopia.
+            try
+            {
+                if (SafeFs.FileExists(FilePath) && TryRead(FilePath) is not null) SafeFs.WriteAllText(FilePath + ".bak", SafeFs.ReadAllText(FilePath));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SafeFsException) { }
             SafeFs.WriteAllText(FilePath, json);
         }
     }

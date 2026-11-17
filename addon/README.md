@@ -37,6 +37,14 @@ Mappen innehåller två TOC-filer. Forever läser `ForeverScout_Forever.toc` och
 
 Addonen skriver inget i chatten om du inte själv skriver ett kommando – utom vid inloggning och `/reload`: en rad om att den är igång och (från 1.0.26) en rad med kvittot på den senaste uppladdningen. Den skriver aldrig i andras chatt utom med `/scout tipsa`. Fel fångas och visas aldrig som felrutor.
 
+## 1.0.30 i korthet
+
+- `/scout tips` speglas i kontots fil (`ForeverScoutDB.tipsOff = true` när tipsen är avstängda, annars inget fält).
+  Klienten 1.0.19 läser bara kontots fil och hämtar den dagliga bildlistan (`ShotList.lua`) bara när tipsen är på.
+  Tipsen är per karaktär; det är den senast inloggade karaktärens val som speglas.
+- Klienten 1.0.19 skriver om `ShotList.lua` ungefär en gång per dygn med färska NPC-id:n (samma format som den
+  medskickade listan, bara heltal och datum). Spelet läser den vid nästa inloggning eller `/reload`.
+
 ## 1.0.28–1.0.29 i korthet
 
 - Tal som inte är ändliga (NaN, ±inf) sparas aldrig – klienten kunde inte läsa en sådan fil.

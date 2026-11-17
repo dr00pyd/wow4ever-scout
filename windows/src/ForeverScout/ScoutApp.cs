@@ -192,6 +192,8 @@ internal sealed class ScoutApp : ApplicationContext
     {
         _gameRoot = null;
         SafeFs.AuctionFilesAllowed = Settings.ShareAuctionPrices; // av som standard: då nekas auktionsaddonernas filer
+        SafeFs.ShotCleanAllowed = Settings.CleanUploadedShots;     // 1.0.19: av som standard: då raderas aldrig något
+        _gameDirTriedAt = DateTime.UtcNow;
         try
         {
             if (!string.IsNullOrEmpty(Settings.GameDir) && Settings.IsGameDirConfirmed() && WowLocator.IsUsableGameDir(Settings.GameDir))
@@ -355,6 +357,12 @@ internal sealed class ScoutApp : ApplicationContext
             Settings.AcceptedTotal = me.AcceptedTotal();
             Settings.ConfirmedTotal = me.Confirmed; // null tills servern skickar fältet "confirmed" → visas som "–"
             Overview.Apply(Settings, me);           // 1.0.18: poäng som väntar på bekräftelse och spelarens bilder (valfria fält)
+            // 1.0.19: meddelande från guiden till just den här spelaren – en gång per meddelande.
+            if (PlayerMessages.Take(Settings, me) is { } message)
+            {
+                Log(F("message.from", message), Theme.Gold);
+                _tray.ShowBalloonTip(15000, "Forever Scout", message, ToolTipIcon.Info);
+            }
             if (me.Recent is { Count: > 0 } recent && Settings.LastConfirmed.Count == 0)
                 Settings.LastConfirmed = recent.Select(ToConfirmed).OfType<ConfirmedItem>().Take(5).ToList();
             Settings.Save();
@@ -427,14 +435,50 @@ internal sealed class ScoutApp : ApplicationContext
     /// <summary>I fältet: lämna tillbaka oanvända sidor högst så ofta (billigt – ingen GC, bara arbetsmängden).</summary>
     private static readonly TimeSpan TrimEvery = TimeSpan.FromMinutes(1);
 
+    /// <summary>1.0.19: senaste försöket att nå den valda spelkatalogen (<see cref="GameDirRetry"/>).</summary>
+    private DateTime _gameDirTriedAt = DateTime.MinValue;
+    private bool _shotListBusy;
+
+    /// <summary>
+    /// 1.0.19: den valda spelkatalogen fanns inte vid start (extern disk, nätverksdisk) – pröva igen en gång i minuten.
+    /// När den går att nå: addonen, statistiken och bevakningen startar som vid en vanlig start.
+    /// </summary>
+    private void RetryGameDir()
+    {
+        if (!GameDirRetry.Due(Settings, CurrentDir is not null, _gameDirTriedAt, DateTime.UtcNow)) return;
+        ApplyGameDir();
+        if (CurrentDir is null) return;
+        Log(F("journal.line", When(DateTime.UtcNow), S("gamedir.back")), Theme.Ok);
+        InstallBundledAddonIfNeeded();
+        RefreshStats(force: true);
+        UpdateStatus();
+        WatchGame();
+        _sync.Notify();
+    }
+
+    /// <summary>1.0.19: daglig bildlista till addonen (<see cref="ShotListFile"/>) – högst en gång per 20 timmar.</summary>
+    private async Task RefreshShotList()
+    {
+        if (_shotListBusy || CurrentDir is not { } dir) return;
+        _shotListBusy = true;
+        try
+        {
+            if (await ShotListFile.RefreshAsync(Api, dir, Settings, DateTime.UtcNow) is int n)
+                Log(F("journal.line", When(DateTime.UtcNow), F("shotlist.done", n)), Theme.Muted);
+        }
+        finally { _shotListBusy = false; }
+    }
+
     private async Task OnTick()
     {
+        RetryGameDir();
         RefreshStats(force: false);
         UpdateStatus();
         WatchGame();
         if (_uploader.RetryDue && AutoUploadActive) _sync.Notify();
         if (DateTime.UtcNow - _meAt > MeEvery) await RefreshMe();
         if (DateTime.UtcNow - _versionAt > VersionEvery) await CheckUpdates(interactive: false);
+        await RefreshShotList();
         if (Live is not { Visible: true } && !_uploadingUi && DateTime.UtcNow - _trimAt > TrimEvery)
         {
             _trimAt = DateTime.UtcNow;
@@ -465,6 +509,7 @@ internal sealed class ScoutApp : ApplicationContext
         if (report.HotfixStored > 0) Log(F("journal.hotfix", now), Theme.Ok);
         if (report.CreatureCacheStored > 0) Log(F("journal.creaturecache", now, report.CreatureCount), Theme.Ok);
         if (report.ShotsUploaded > 0) Log(F("journal.shots", now, report.ShotsUploaded), Theme.Ok);
+        if (report.ShotsCleaned > 0) Log(F("journal.line", now, F("shotclean.done", report.ShotsCleaned)), Theme.Muted);
         if (report.AuctionRows > 0) Log(F("journal.auctions", now, report.AuctionRows), Theme.Ok);
         if (report.NothingToDo && !quietIfNothing) Log(F("journal.nothing", now), Theme.Muted);
         if (report.FilesUploaded > 0 || report.HotfixStored > 0)
@@ -542,6 +587,7 @@ internal sealed class ScoutApp : ApplicationContext
             // L10: signature2 krävs (ReleaseVerifier) och "issued" får inte vara äldre än den senaste vi sett.
             var release = Settings.AcceptRelease(await Api.VersionAsync(Settings.TrustedKeys, Settings.Beta), Settings.Beta);
             Settings.BlockedAddons = release.BlockedAddons.ToList();
+            Features.Apply(Settings, release); // 1.0.19: funktioner som guiden har stängt av (signerat fält "off")
             Settings.Save();
             Announce(release);
             await UpdateAddon(release, interactive, announceBlocked: false, alsoBlocked: null);

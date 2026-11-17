@@ -201,7 +201,8 @@ public sealed class SyncTests : IDisposable
         var req = Assert.Single(srv.Requests);
         var headers = req.Headers.Select(h => h.Key).Concat(req.Content!.Headers.Select(h => h.Key)).Select(h => h.ToLowerInvariant()).OrderBy(x => x).ToArray();
         Assert.Equal(["authorization", "content-encoding", "content-length", "content-type", "user-agent"], headers.Where(h => h != "content-length").Append("content-length").OrderBy(x => x).ToArray());
-        Assert.Matches(@"^ForeverScout/\d+\.\d+\.\d+$", string.Join(" ", req.Headers.GetValues("User-Agent")));
+        // 1.0.19: produkt, version, plattform och variant – inget annat.
+        Assert.Matches(@"^ForeverScout/\d+\.\d+\.\d+ \((windows|mac|linux); (full|lite|store)\)$", string.Join(" ", req.Headers.GetValues("User-Agent")));
         using var gz = new GZipStream(new MemoryStream(srv.Bodies[0]), CompressionMode.Decompress);
         using var ms = new MemoryStream();
         gz.CopyTo(ms);

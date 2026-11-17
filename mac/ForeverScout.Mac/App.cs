@@ -70,6 +70,9 @@ internal sealed class App : Application
 
         var scout = new ScoutController(desktop, s.Settings, s.Api);
         desktop.Exit += (_, _) => scout.Dispose();
+        // 1.0.19: klick på ikonen i Dock (macOS "reopen") öppnar fönstret.
+        if (Current?.TryGetFeature(typeof(IActivatableLifetime)) is IActivatableLifetime activatable)
+            activatable.Activated += (_, e) => { if (e.Kind == ActivationKind.Reopen) Dispatcher.UIThread.Post(scout.ShowWindow); };
         // Lämna över till en nyare (eller annan) kopia som startas medan vi kör.
         s.Instance?.Listen(
             req => Takeover.Decide(BuildInfo.Version, Environment.ProcessPath ?? "", req),

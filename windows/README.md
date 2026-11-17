@@ -216,6 +216,33 @@ Allt nytt ligger i `ForeverScout.Core` och är samma på Windows, macOS och Linu
   i en helt annan katalog än den valda.
 - Tester: `tests/Release118Tests.cs` (delas med `client/mac/tests`) och `tests/Release118UiTests.cs` (det riktiga fönstret).
 
+## 1.0.19 – funktionsflaggor, meddelanden, daglig bildlista, städning av bilder
+Allt nytt ligger i `ForeverScout.Core/Release119.cs` och är samma på Windows, macOS och Linux.
+- **Funktionsflaggor** (`Features`). Det signerade fältet `off` i versionsinfon (`scout-sign --off shotlist,shotclean`,
+  bara med `signatureAll`) stänger av en funktion för alla klienter utan klientsläpp: `shotlist`, `shotclean`, `shots`,
+  `auctions`, `hotfix`, `creatures`. Inställningen ändras inte; funktionen gäller igen när fältet tas bort.
+- **Meddelanden till en spelare** (`PlayerMessages`). `scout-admin message <id> <text>` lägger ett meddelande som
+  `GET /api/bidrag/jag` skickar med i 30 dagar (`message: { id, text }`). Appen visar varje id en gång – rad i
+  lägerjournalen och en bubbla.
+- **Daglig bildlista** (`ShotListFile`). Högst en gång per 20 timmar hämtas `GET /api/scout/bildlista` (offentlig, ingen
+  nyckel) och `Interface\AddOns\ForeverScout\ShotList.lua` skrivs om – bara heltal och datumet, samma format som den
+  medskickade listan. Bara när addonen är installerad, bildtipsen är på (addonen 1.0.30 speglar `/scout tips` i
+  `ForeverScoutDB.tipsOff`) och funktionen inte är avstängd. En äldre lista skriver aldrig över en nyare, och en nyare
+  lista behålls när addonen uppdateras.
+- **Städning av skickade bilder** (`ShotCleaner`, Inställningar, **av som standard**). När servern har tagit emot en
+  bild (published, queued, duplicate) raderas just den filen i `Screenshots`. Det enda undantaget från "rör aldrig
+  spelarens filer": `SafeFs.DeleteOwnScreenshot` kräver att inställningen är på (`SafeFs.ShotCleanAllowed`) och godtar
+  bara spelets egna namn `WoWScrnShot_MMDDYY_HHMMSS.*` direkt i `Screenshots`; ingen annan operation får skriva där.
+- **Inställningarna** tål en trasig fil (den senaste goda kopian `settings.json.bak` läses) och behåller fält som en
+  nyare version har skrivit (`[JsonExtensionData]`).
+- **Addonbytet rullas tillbaka**: misslyckas bytet (en fil låst, fel version efteråt) läggs den gamla addonen tillbaka.
+- **Spelkatalogen prövas igen** en gång i minuten om den valda katalogen inte fanns vid start (extern disk).
+- **User-Agent**: `ForeverScout/1.0.19 (windows; store)` – plattform och variant, inget annat. Servern sparar varianten
+  per uppladdning (`uploads.variant`) och påminner om uppdateringar per plattform (Store: ingen påminnelse om appen).
+- **Felrapportlänken** fyller i plattform och version (`?plattform=store&version=1.0.19#rapportera-fel`).
+- **Symlänk i spelkatalogen** får en egen förklaring i stället för "Åtkomst utanför WoW-katalogen nekades".
+- Tester: `tests/Release119Tests.cs` (delas med `client/mac/tests`) och städningen i `tests/ShotTests.cs`.
+
 ## Minne (1.0.11)
 Appen ligger i fältet i dagar, så det som syns i Aktivitetshanteraren är arbetsmängden i fältläget. 1.0.10 läste
 varje fil (SavedVariables, `DBCache.bin`, auktionsfilerna) i sin helhet via en `MemoryStream` för att räkna ut

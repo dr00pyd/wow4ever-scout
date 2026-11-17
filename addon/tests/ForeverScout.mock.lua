@@ -1584,8 +1584,10 @@ do
     check(ForeverScoutOpt.tipsOff == true and hover(mob(7777)) == false, "1.0.25: /scout tips off")
     SlashCmdList.FOREVERSCOUT("tips off")
     check(ForeverScoutOpt.tipsOff == true, "1.0.25: /scout tips off två gånger är fortfarande av")
+    check(ForeverScoutDB.tipsOff == true, "1.0.30: avstängda tips speglas i kontots fil (klienten hämtar då ingen bildlista)")
     SlashCmdList.FOREVERSCOUT("tips on")
     check(ForeverScoutOpt.tipsOff == nil and hover(mob(7777)) == true, "1.0.25: /scout tips on")
+    check(ForeverScoutDB.tipsOff == nil, "1.0.30: påslagna tips = inget fält i kontots fil")
     for _, lang in ipairs({ "en", "sv" }) do
       ForeverScoutOpt.lang = lang
       local from, found = #said, false

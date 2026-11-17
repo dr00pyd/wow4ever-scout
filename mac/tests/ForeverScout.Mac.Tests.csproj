@@ -55,6 +55,8 @@
     <Compile Include="..\..\windows\tests\SignedAllTests.cs" Link="Shared\SignedAllTests.cs" />
     <!-- 1.0.18: reservnyckeln (två nycklar, fingeravtryck, återkallelse av huvudnyckeln) – samma kontroll på alla plattformar. -->
     <Compile Include="..\..\windows\tests\ReserveKeyTests.cs" Link="Shared\ReserveKeyTests.cs" />
+    <!-- 1.0.19: funktionsflaggor, meddelanden, bildlistan, städningen, inställningarna, addonbytet, LaunchAgent – allt i Core. -->
+    <Compile Include="..\..\windows\tests\Release119Tests.cs" Link="Shared\Release119Tests.cs" />
   </ItemGroup>
 
 </Project>

@@ -68,6 +68,8 @@ public sealed class MeResult
     [JsonPropertyName("pendingFinds")] public JsonElement? PendingFinds { get; set; }
     /// <summary>1.0.18 (valfritt): <c>{ published, pending, rejected }</c> – spelarens Scout-bilder.</summary>
     [JsonPropertyName("media")] public JsonElement? Media { get; set; }
+    /// <summary>1.0.19 (valfritt): <c>{ id, text }</c> – meddelande från guiden till just den här spelaren (<see cref="PlayerMessages"/>).</summary>
+    [JsonPropertyName("message")] public JsonElement? Message { get; set; }
 
     /// <summary>Summan av "counts" för datatyperna (poster som servern godtagit, inte samma sak som bekräftade).</summary>
     public int? AcceptedTotal()
@@ -150,8 +152,17 @@ public sealed class ApiClient : IDisposable
     /// <summary>Enda värden appen pratar med (i Release-byggen kan den inte bytas).</summary>
     public const string Host = "guide.wow4ever.se";
 
-    /// <summary>"ForeverScout/&lt;version&gt;" – inget annat om datorn skickas.</summary>
-    public static string UserAgent => "ForeverScout/" + (System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(1, 0, 0)).ToString(3);
+    /// <summary>
+    /// "ForeverScout/&lt;version&gt; (&lt;plattform&gt;; &lt;variant&gt;)", t.ex. "ForeverScout/1.0.19 (windows; store)" – inget
+    /// annat om datorn skickas. 1.0.19: plattformen och varianten (full, lite, store) gör att guiden kan säga rätt sak
+    /// om uppdateringar (Store uppdateras via Microsoft Store) och se vilka varianter som används. Servern godtar
+    /// formatet från live-196 (lib/scout/release.ts clientLabel/clientVariant).
+    /// </summary>
+    public static string UserAgent => "ForeverScout/" + (System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(1, 0, 0)).ToString(3)
+        + " (" + Platform + "; " + BuildInfo.Variant + ")";
+
+    /// <summary>"windows", "mac" eller "linux".</summary>
+    public static string Platform => OperatingSystem.IsMacOS() ? "mac" : OperatingSystem.IsLinux() ? "linux" : "windows";
 
     public ApiClient(string? baseUrl = null, HttpMessageHandler? handler = null)
     {
@@ -368,6 +379,32 @@ public sealed class ApiClient : IDisposable
     }
 
     public Task<MeResult> MeAsync(CancellationToken ct = default) => Send<MeResult>(Req(HttpMethod.Get, "/api/bidrag/jag", true), ct);
+
+    /// <summary>1.0.19: bildlistan som rå JSON (<c>{ built, n, ids }</c>, offentlig – ingen nyckel skickas). Högst 2 MB.</summary>
+    public async Task<string> ShotListJsonAsync(CancellationToken ct = default)
+    {
+        using var req = Req(HttpMethod.Get, "/api/scout/bildlista", false);
+        HttpResponseMessage res;
+        try { res = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct); }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested) { throw new ApiException(ErrorCodes.Timeout, transient: true); }
+        catch (HttpRequestException) { throw new ApiException(ErrorCodes.Network, transient: true); }
+        using (res)
+        {
+            if ((int)res.StatusCode is >= 300 and < 400) throw new ApiException(ErrorCodes.Redirect, res.StatusCode);
+            if (!res.IsSuccessStatusCode) throw new ApiException(ErrorCodes.Http, res.StatusCode, transient: (int)res.StatusCode >= 500 || (int)res.StatusCode == 429);
+            if (res.Content.Headers.ContentLength is > 2_000_000) throw new ApiException(ErrorCodes.DownloadTooLarge);
+            await using var s = await res.Content.ReadAsStreamAsync(ct);
+            using var ms = new MemoryStream();
+            var buf = new byte[81920];
+            int n;
+            while ((n = await s.ReadAsync(buf, ct)) > 0)
+            {
+                ms.Write(buf, 0, n);
+                if (ms.Length > 2_000_000) throw new ApiException(ErrorCodes.DownloadTooLarge);
+            }
+            return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+        }
+    }
 
     /// <summary>Hämtar versionsinfo och verifierar dess signatur. Saknad eller felaktig signatur = fel, ingen reserv.</summary>
     /// <summary>1.0.13: beta-kanalen (Settings.Beta) har en egen signerad versionsinfo; saknas den svarar servern med den vanliga.</summary>

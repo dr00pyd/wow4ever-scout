@@ -20,6 +20,8 @@ internal sealed class SettingsWindow : Window
     private readonly CheckBox _hotfix = Check(T("set.hotfix"));
     private readonly CheckBox _creatures = Check(T("set.creaturecache")); // 1.0.14: varelsecachen
     private readonly CheckBox _shots = Check(T("set.shots")); // 1.0.17: bilder tagna med /scout bild
+    private readonly CheckBox _shotClean = Check(T("set.shotclean")); // 1.0.19: skickade bilder tas bort (av som standard)
+    private readonly CheckBox _dock = Check(T("set.dock")); // 1.0.19: macOS – ikon i Dock (på som standard)
     private readonly CheckBox _auction = Check(T("set.auction"));
     private readonly CheckBox _beta = Check(T("set.beta"));
     private readonly CheckBox _askClose = Check(T("set.askclose"));
@@ -71,6 +73,12 @@ internal sealed class SettingsWindow : Window
         shotsHint.MaxWidth = 520;
         shotsHint.Margin = new Thickness(28, 0, 0, 4);
         flow.Children.Add(shotsHint);
+        _shotClean.Margin = new Thickness(28, 0, 0, 0);
+        flow.Children.Add(_shotClean);
+        var cleanHint = Look.Label(T("set.shotclean.hint"), 12, Look.Muted);
+        cleanHint.MaxWidth = 500;
+        cleanHint.Margin = new Thickness(56, 0, 0, 4);
+        flow.Children.Add(cleanHint);
         flow.Children.Add(_auction);
         flow.Children.Add(_beta); // 1.0.13: beta-kanalen för testare
         var auctionHint = Look.Label(T("set.auction.hint"), 12, Look.Muted);
@@ -78,6 +86,14 @@ internal sealed class SettingsWindow : Window
         auctionHint.Margin = new Thickness(28, 0, 0, 4);
         flow.Children.Add(auctionHint);
         flow.Children.Add(_autostart);
+        if (OperatingSystem.IsMacOS())
+        {
+            flow.Children.Add(_dock);
+            var dockHint = Look.Label(T("set.dock.hint"), 12, Look.Muted);
+            dockHint.MaxWidth = 520;
+            dockHint.Margin = new Thickness(28, 0, 0, 4);
+            flow.Children.Add(dockHint);
+        }
         flow.Children.Add(_askClose);
 
         var openLog = Look.QuietButton(T("set.openlog"));
@@ -140,6 +156,8 @@ internal sealed class SettingsWindow : Window
         _hotfix.IsChecked = settings.UploadHotfix;
         _creatures.IsChecked = settings.UploadCreatureCache;
         _shots.IsChecked = settings.UploadShots;
+        _shotClean.IsChecked = settings.CleanUploadedShots;
+        _dock.IsChecked = settings.ShowInDock;
         _auction.IsChecked = settings.ShareAuctionPrices;
         _beta.IsChecked = settings.Beta;
         _askClose.IsChecked = !settings.DontAskOnClose;
@@ -181,6 +199,8 @@ internal sealed class SettingsWindow : Window
         _settings.UploadHotfix = _hotfix.IsChecked == true;
         _settings.UploadCreatureCache = _creatures.IsChecked == true;
         _settings.UploadShots = _shots.IsChecked == true;
+        _settings.CleanUploadedShots = _shotClean.IsChecked == true;
+        if (OperatingSystem.IsMacOS()) _settings.ShowInDock = _dock.IsChecked == true;
         _settings.ShareAuctionPrices = _auction.IsChecked == true;
         _settings.Beta = _beta.IsChecked == true;
         _settings.DontAskOnClose = _askClose.IsChecked != true;

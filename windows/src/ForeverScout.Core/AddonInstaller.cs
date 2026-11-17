@@ -94,6 +94,9 @@ public static class AddonInstaller
         // en tom standardfil – ett befintligt kvitto behålls, annars skulle addonen efter en uppdatering säga att inget
         // har skickats. Kvittot läses strikt (bara klientens eget format) och skrivs om från talen, aldrig kopierat.
         var receipt = AddonReceipt.ReadInstalled(dir);
+        // 1.0.19: en daglig bildlista som klienten skrivit och som är nyare än den som följer med addonen behålls (läst
+        // strikt, skriven om från talen – samma princip som kvittot).
+        var ownList = ShotListFile.ReadInstalledOwn(dir);
         foreach (var f in files)
         {
             var rel = f.RelativePath.Replace('/', Path.DirectorySeparatorChar);
@@ -102,12 +105,48 @@ public static class AddonInstaller
             if (!dest.StartsWith(stagingFull, StringComparison.OrdinalIgnoreCase)) continue; // ingen ../
             SafeFs.CreateDirectory(Path.GetDirectoryName(dest)!);
             bool isReceipt = receipt is not null && string.Equals(f.RelativePath, AddonReceipt.FileName, StringComparison.OrdinalIgnoreCase);
-            SafeFs.WriteAllBytes(dest, isReceipt ? System.Text.Encoding.ASCII.GetBytes(AddonReceipt.Render(receipt!)) : f.Data);
+            bool keepList = ownList is not null && string.Equals(f.RelativePath, ShotListFile.FileName, StringComparison.OrdinalIgnoreCase)
+                && string.CompareOrdinal(ownList.Built, ShotListFile.BuiltOf(System.Text.Encoding.UTF8.GetString(f.Data)) ?? "") > 0;
+            SafeFs.WriteAllBytes(dest, isReceipt ? System.Text.Encoding.ASCII.GetBytes(AddonReceipt.Render(receipt!))
+                : keepList ? System.Text.Encoding.ASCII.GetBytes(ShotListFile.Render(ownList!)) : f.Data);
         }
         SafeFs.DeleteDirectory(old);
-        if (SafeFs.DirectoryExists(target)) SafeFs.MoveDirectory(target, old);
-        SafeFs.MoveDirectory(staging, target);
+        bool hadOld = SafeFs.DirectoryExists(target);
+        if (hadOld) SafeFs.MoveDirectory(target, old);
+        try
+        {
+            SafeFs.MoveDirectory(staging, target);
+            // Den nya addonen ska gå att läsa (rätt .toc) innan den gamla tas bort.
+            if (BundledVersion(files) is { } want && CompareVersions(InstalledVersion(dir), want) != 0) throw new ScoutException(ErrorCodes.AddonInvalid);
+        }
+        catch (Exception ex) when (hadOld && ex is IOException or UnauthorizedAccessException or ScoutException)
+        {
+            // 1.0.19: bytet misslyckades halvvägs (spelet eller en virusskanner höll en fil, disken full) – förr kunde
+            // spelaren stå helt utan addon. Nu läggs den gamla tillbaka och felet visas; nästa kontroll försöker igen.
+            Rollback(target, old, staging);
+            throw;
+        }
         try { SafeFs.DeleteDirectory(old); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Lägger tillbaka den gamla addonen efter ett misslyckat byte (bästa försök).</summary>
+    private static void Rollback(string target, string old, string staging)
+    {
+        try
+        {
+            if (!SafeFs.DirectoryExists(old)) return;
+            if (SafeFs.DirectoryExists(target))
+            {
+                SafeFs.DeleteDirectory(staging);
+                SafeFs.MoveDirectory(target, staging); // den halvfärdiga nya – städas vid nästa installation
+            }
+            SafeFs.MoveDirectory(old, target);
+            UploadLog.Append("addon", 0, "", "rollback ok");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ScoutException)
+        {
+            UploadLog.Append("addon", 0, "", "rollback failed " + ex.GetType().Name);
+        }
     }
 
     /// <summary>Läser en addon-zip (från servern, redan sha256-kontrollerad). Mappen "ForeverScout/" i zip:en tas bort ur sökvägen.</summary>

@@ -167,6 +167,34 @@ public static class SafeFs
         set => _auctionFiles = value;
     }
 
+    private static volatile bool _shotClean;
+    /// <summary>
+    /// 1.0.19: "Ta bort skickade /scout bild-bilder" (av som standard). Bara när den är på får
+    /// <see cref="DeleteOwnScreenshot"/> radera – och bara spelets egna skärmbildsnamn direkt i Screenshots.
+    /// </summary>
+    public static bool ShotCleanAllowed
+    {
+        get => _shotClean;
+        set => _shotClean = value;
+    }
+
+    /// <summary>Sätts bara under <see cref="DeleteOwnScreenshot"/> på den tråden – ingen annan operation får skriva i Screenshots.</summary>
+    [ThreadStatic] private static bool _deletingShot;
+
+    /// <summary>
+    /// 1.0.19: raderar en skärmbild som servern har tagit emot (<see cref="ShotCleaner"/>). Det ENDA undantaget från
+    /// "rör aldrig spelarens filer": bara när <see cref="ShotCleanAllowed"/> är på, bara
+    /// <c>&lt;spelkatalog&gt;\Screenshots\WoWScrnShot_MMDDYY_HHMMSS.jpg|jpeg|png|tga</c>, aldrig en länk, aldrig en katalog.
+    /// </summary>
+    public static void DeleteOwnScreenshot(string path)
+    {
+        if (!_shotClean) throw new SafeFsException("shot-clean-off", path);
+        if (!WowLocator.IsScreenshotName(Path.GetFileName(path))) throw new SafeFsException("not-a-screenshot", path);
+        _deletingShot = true;
+        try { DeleteFile(path); }
+        finally { _deletingShot = false; }
+    }
+
     /// <summary>Lägger till en spelkatalog utan att ta bort andra (tester).</summary>
     public static string AllowGameDir(string dir)
     {
@@ -341,7 +369,7 @@ public static class SafeFs
         {
             // 1.0.15: bara spelets egna skärmbilder (WoWScrnShot_MMDDYY_HHMMSS.jpg m.fl.) – inga andra filer, inga underkataloger
             if (n == 1) return isDir ? Access.Probe : null;
-            if (n == 2 && !isDir && WowLocator.IsScreenshotName(r[1])) return Access.Read;
+            if (n == 2 && !isDir && WowLocator.IsScreenshotName(r[1])) return _deletingShot && _shotClean ? Access.Write : Access.Read; // 1.0.19: bara DeleteOwnScreenshot
             return null;
         }
         return null;
@@ -1216,12 +1244,23 @@ public static class SafeFs
     {
         var agent = LaunchAgentPath;
         if (!on) { DeleteFile(agent); return; }
-        string[] args = OwnBundle is { } b
-            ? ["/usr/bin/open", "-g", "-a", b, "--args", "--tray"]
-            : [Normalize(OwnExeOverride ?? Environment.ProcessPath ?? throw new SafeFsException("no-exe", "")), "--tray"];
+        string[] args = LaunchAgentArgs(OwnBundle, OwnExeOverride ?? Environment.ProcessPath);
         CreateDirectory(Path.GetDirectoryName(agent)!);
         WriteAllText(agent, LaunchAgentPlist(args));
     }
+
+    /// <summary>
+    /// LaunchAgent-filens programrad (ren funktion, testas). 1.0.19: körs appen från Gatekeepers tillfälliga kopia (App
+    /// Translocation – startad direkt ur Hämtade filer eller DMG:n) pekar sökvägen på en mapp som försvinner, och
+    /// "Starta vid inloggning" slutade fungera. Då startas appen i stället via sitt paket-id (<c>open -b</c>), som
+    /// macOS slår upp där appen faktiskt ligger; nästa start från Program skriver om filen med den riktiga sökvägen.
+    /// </summary>
+    internal static string[] LaunchAgentArgs(string? bundle, string? exe) =>
+        bundle is { } b
+            ? MacBundleUpdater.IsTranslocated(b)
+                ? ["/usr/bin/open", "-g", "-b", MacBundleId, "--args", "--tray"]
+                : ["/usr/bin/open", "-g", "-a", b, "--args", "--tray"]
+            : [Normalize(exe ?? throw new SafeFsException("no-exe", "")), "--tray"];
 
     /// <summary>LaunchAgent-filens innehåll (ren funktion, testas).</summary>
     internal static string LaunchAgentPlist(IReadOnlyList<string> programArguments)

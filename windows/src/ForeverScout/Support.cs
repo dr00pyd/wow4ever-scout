@@ -175,7 +175,8 @@ internal static class Links
     public static string Faq(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/vanliga-fragor" : "/en/contribute/faq").ToString();
     public static string Terms(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/villkor" : "/en/contribute/terms").ToString();
     public static string Privacy(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/integritet" : "/en/contribute/privacy").ToString();
-    public static string Report(ApiClient api) => Contribute(api) + "#rapportera-fel";
+    /// <summary>1.0.19: plattform och version följer med (<see cref="BugLink"/>).</summary>
+    public static string Report(ApiClient api) => Contribute(api) + BugLink.Query + "#rapportera-fel";
     public static string Download(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/ladda-ner" : "/en/contribute/download").ToString();
     /// <summary>1.0.18: "Mina bilder" – spelarens Scout-bilder på sajten.</summary>
     public static string Pictures(ApiClient api) => api.Site(Overview.PicturesPath(Strings.IsSv)).ToString();

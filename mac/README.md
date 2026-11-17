@@ -50,6 +50,7 @@ nu också granskar `client/mac/ForeverScout.Mac`). På macOS gäller:
 | `<spelkatalog>/Screenshots/WoWScrnShot_MMDDYY_HHMMSS.jpg`/`.jpeg`/`.png`/`.tga` | läsa (1.0.17 – bara spelets egna skärmbilder, och av dem bara den som en `/scout bild`-post i addonens fil pekar ut; kan stängas av i Inställningar) |
 | `Interface`, `WTF/Account/*`, `…/SavedVariables`, `Cache/ADB/*`, `Cache/WDB/*`, `Screenshots` | bara existens och listning |
 | `~/Library/Application Support/ForeverScout/**` (katalogen 0700) | `settings.json`, `uploads.log`, `instance.lock`, `instance.sock` |
+| `<spelkatalog>/Screenshots/WoWScrnShot_*` | **radera**, bara när "Ta bort skickade /scout bild-bilder" är på (1.0.19, av som standard) och bara den bild som guiden just tog emot |
 | `~/Library/LaunchAgents/se.wow4ever.foreverscout.plist` | när "Starta vid inloggning" är på – från 1.0.12 förvalt på välkomstskärmen (går att kryssa ur), annars av tills du kryssar i den i Inställningar |
 | det egna `Forever Scout.app` (som helhet) och `.ForeverScout-update/` bredvid det | bara under självuppdateringen |
 
@@ -80,6 +81,16 @@ nu också granskar `client/mac/ForeverScout.Mac`). På macOS gäller:
   med fasta sökvägar och utan skal. Länkar öppnas med `open` (bara https mot guide.wow4ever.se).
 - **Nätverk:** samma som Windows – bara `https://guide.wow4ever.se`, samma anrop och rubriker (inloggningen med
   webbläsaren skickar `platform: "mac"`).
+
+### 1.0.19 på macOS
+- **Visa i Dock** (Inställningar, på som standard). Menyradsikonen kan hamna bakom kameraskåran eller döljas av macOS,
+  och då syns inte att appen körs. Med Dock-ikonen syns den alltid; klick på ikonen öppnar fönstret, högerklick →
+  Avsluta avslutar. Info.plist har kvar `LSUIElement=true`; valet sätts när appen startar
+  (`MacOSPlatformOptions.ShowInDock`), så appen startar om när det ändras.
+- **Starta vid inloggning från en tillfällig kopia**: startas appen direkt ur Hämtade filer eller DMG:n (App
+  Translocation) skrivs LaunchAgent-filen med `open -b se.wow4ever.foreverscout` i stället för en sökväg som försvinner.
+  Nästa start från Program skriver om den med den riktiga sökvägen.
+- Resten (funktionsflaggor, meddelanden, bildlistan, städningen, inställningsfilen) är Core – se Windows-README.
 
 ## Gränssnittet
 - **Menyraden:** lägereldens siluett som mallbild (följer ljust/mörkt läge). Under uppladdning en färgad eld med

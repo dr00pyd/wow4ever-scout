@@ -15,6 +15,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _hotfix = Check(S("set.hotfix"));
     private readonly CheckBox _creatures = Check(S("set.creaturecache")); // 1.0.14: varelsecachen
     private readonly CheckBox _shots = Check(S("set.shots")); // 1.0.15: bilder tagna med /scout bild
+    private readonly CheckBox _shotClean = Check(S("set.shotclean")); // 1.0.19: skickade bilder tas bort (av som standard)
     private readonly CheckBox _auction = Check(S("set.auction"));
     private readonly CheckBox _askClose = Check(S("set.askclose"));
     private readonly Label _error = Theme.Label("", 9.5f, Theme.Err);
@@ -61,6 +62,9 @@ internal sealed class SettingsForm : Form
             flow.Controls.Add(new Label { Text = S("set.creaturecache.hint"), AutoSize = true, MaximumSize = new Size(520, 0), ForeColor = Theme.Muted, Font = Theme.Ui(9f), Margin = new Padding(20, 0, 0, 4) });
             flow.Controls.Add(_shots);
             flow.Controls.Add(new Label { Text = S("set.shots.hint"), AutoSize = true, MaximumSize = new Size(520, 0), ForeColor = Theme.Muted, Font = Theme.Ui(9f), Margin = new Padding(20, 0, 0, 4) });
+            _shotClean.Margin = new Padding(20, 2, 0, 2);
+            flow.Controls.Add(_shotClean);
+            flow.Controls.Add(new Label { Text = S("set.shotclean.hint"), AutoSize = true, MaximumSize = new Size(500, 0), ForeColor = Theme.Muted, Font = Theme.Ui(9f), Margin = new Padding(40, 0, 0, 4) });
             flow.Controls.Add(_auction);
             var auctionHint = new Label { Text = S("set.auction.hint"), AutoSize = true, MaximumSize = new Size(520, 0), ForeColor = Theme.Muted, Font = Theme.Ui(9f), Margin = new Padding(20, 0, 0, 4) };
             flow.Controls.Add(auctionHint);
@@ -130,6 +134,7 @@ internal sealed class SettingsForm : Form
         _hotfix.Checked = settings.UploadHotfix;
         _creatures.Checked = settings.UploadCreatureCache;
         _shots.Checked = settings.UploadShots;
+        _shotClean.Checked = settings.CleanUploadedShots;
         _auction.Checked = settings.ShareAuctionPrices;
         _askClose.Checked = !settings.DontAskOnClose;
         _beta.Checked = settings.Beta;
@@ -171,6 +176,7 @@ internal sealed class SettingsForm : Form
         _settings.UploadHotfix = _hotfix.Checked;
         _settings.UploadCreatureCache = _creatures.Checked;
         _settings.UploadShots = _shots.Checked;
+        _settings.CleanUploadedShots = _shotClean.Checked;
         _settings.ShareAuctionPrices = _auction.Checked;
         _settings.DontAskOnClose = !_askClose.Checked;
         _settings.Beta = _beta.Checked;

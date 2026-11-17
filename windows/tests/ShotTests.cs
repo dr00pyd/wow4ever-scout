@@ -295,6 +295,33 @@ public sealed class ShotTests : IDisposable
         Assert.Throws<SafeFsException>(() => SafeFs.WriteAllBytes(Path.Combine(shots, NameAt(T0 + 50)), [0]));
     }
 
+    [Theory]
+    [InlineData(true, false, true)]   // på: bilden som servern tog emot raderas
+    [InlineData(false, false, false)] // av (standard): inget raderas
+    [InlineData(true, true, false)]   // på, men servern avvisade bilden: rörs inte
+    public async Task CleaningRemovesOnlyTheReceivedPictureWhenTurnedOn(bool clean, bool rejected, bool gone)
+    {
+        // 1.0.19: valfri städning av skickade /scout bild-bilder.
+        var (dir, shots, match, _) = Game();
+        var (up, srv, set, _, _) = NewUploader();
+        set.CleanUploadedShots = clean;
+        set.FeaturesOff = [];
+        SafeFs.ShotCleanAllowed = clean;
+        if (rejected) srv.Status = HttpStatusCode.UnprocessableEntity;
+        try
+        {
+            var report = await up.SyncAsync(dir, force: false);
+            Assert.Single(srv.Shots());
+            Assert.Equal(!File.Exists(match), gone);
+            Assert.Equal(gone ? 1 : 0, report.ShotsCleaned);
+            // Spelarens egna bilder och spelets andra bilder rörs aldrig.
+            Assert.True(File.Exists(Path.Combine(shots, "semester.jpg")));
+            Assert.True(File.Exists(Path.Combine(shots, NameAt(T0 - 7200))));
+            Assert.True(File.Exists(Path.Combine(shots, "Gamla", NameAt(T0))));
+        }
+        finally { SafeFs.ShotCleanAllowed = false; }
+    }
+
     [Fact]
     public void NoScreenshotsFolderGivesEmptyList()
     {

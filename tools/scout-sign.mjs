@@ -12,7 +12,7 @@
 //       [--addon <ForeverScout-addon.zip>] [--addon-version x.y.z] [--out public/scout] [--block 0.9.0,0.9.1]
 //       [--mac <ForeverScout-mac.zip>] [--mac-version x.y.z] [--allow-unnotarized] [--dmg <ForeverScout-x.y.z.dmg>]
 //       [--linux <ForeverScout-x86_64.AppImage>] [--linux-version x.y.z]
-//       [--min-client x.y.z|none] [--notice "text"|none] [--notice-en "text"|none]
+//       [--min-client x.y.z|none] [--notice "text"|none] [--notice-en "text"|none] [--off shotlist,shotclean|none]
 //       [--revoke-primary <huvudnyckelns publika .pem>|none] [--client-keys <UpdateKeys.cs>]
 //       Kopierar filerna till <out> (ForeverScout.exe, ForeverScout-addon.zip, ForeverScout-mac.zip) och skriver
 //       <out>/version.json. En del som inte anges (t.ex. bara --addon) behålls från befintlig version.json med sin
@@ -81,7 +81,15 @@ const SIGNED_FIELDS_4 = [...SIGNED_FIELDS_3, ...DMG_FIELDS].sort();
 const LINUX_FIELDS = ["linux", "linuxFile", "linuxSha256", "linuxSig"];
 const SIGNED_FIELDS_5 = [...SIGNED_FIELDS_4, ...LINUX_FIELDS].sort();
 /** Fält som bara signatureAll täcker. Nya fält läggs här – klienten behöver inte ändras för att verifiera dem. */
-const EXTRA_FIELDS = ["minClient", "notice", "noticeEn", "primaryRevoked"];
+const EXTRA_FIELDS = ["minClient", "notice", "noticeEn", "off", "primaryRevoked"];
+/**
+ * 2026-11-17 (klient 1.0.19): funktioner som kan stängas av för alla klienter utan nytt klientsläpp (--off, signerat
+ * fält "off", kommaseparerat). Klienter till och med 1.0.18 ignorerar fältet.
+ *   shotlist  – daglig bildlista till addonen     shotclean – städning av skickade /scout bild-bilder
+ *   shots     – uppladdning av bilder              auctions  – auktionspriser
+ *   hotfix    – DBCache.bin                        creatures – creaturecache.wdb
+ */
+export const FEATURES = ["auctions", "creatures", "hotfix", "shotclean", "shotlist", "shots"];
 
 /** Nyckelns fingeravtryck: SHA-256 (hex) över den publika nyckeln i DER-form – samma som ReleaseVerifier.Fingerprint. */
 export const fingerprint = (key) => {
@@ -118,7 +126,7 @@ export function betaName(n) {
 }
 
 const FLAGS = new Set(["genkey", "key", "version", "exe", "exe-lite", "lite-version", "setup", "setup-version", "addon", "addon-version", "out", "block",
-  "mac", "mac-version", "allow-unnotarized", "dmg", "linux", "linux-version", "channel", "min-client", "store-version", "notice", "notice-en", "revoke-primary", "client-keys"]);
+  "mac", "mac-version", "allow-unnotarized", "dmg", "linux", "linux-version", "channel", "min-client", "store-version", "notice", "notice-en", "off", "revoke-primary", "client-keys"]);
 
 function args(argv) {
   const out = {};
@@ -258,8 +266,8 @@ function genkey(dir) {
 function release(a) {
   if (typeof a.key !== "string") fail("--key <privat.pem> krävs");
   if (typeof a.version !== "string" || !VERSION.test(a.version)) fail("--version x.y.z krävs");
-  const extras = a["min-client"] !== undefined || a.notice !== undefined || a["notice-en"] !== undefined || a["revoke-primary"] !== undefined;
-  if (!a.exe && !a["exe-lite"] && !a.setup && !a.addon && !a.mac && !a.dmg && !a.linux && !extras) fail("ange --exe, --exe-lite, --setup, --addon, --mac, --dmg, --linux, --min-client, --notice och/eller --revoke-primary");
+  const extras = a["min-client"] !== undefined || a.notice !== undefined || a["notice-en"] !== undefined || a.off !== undefined || a["revoke-primary"] !== undefined;
+  if (!a.exe && !a["exe-lite"] && !a.setup && !a.addon && !a.mac && !a.dmg && !a.linux && !extras) fail("ange --exe, --exe-lite, --setup, --addon, --mac, --dmg, --linux, --min-client, --notice, --off och/eller --revoke-primary");
   const linuxVersion = typeof a["linux-version"] === "string" ? a["linux-version"] : a.version;
   if (!VERSION.test(linuxVersion)) fail("ogiltig --linux-version");
   const macVersion = typeof a["mac-version"] === "string" ? a["mac-version"] : a.version;
@@ -309,7 +317,7 @@ function release(a) {
   // Servern läser lägsta version ur version.json, och beskedet ska vara samma för alla: i beta-kanalen följer de
   // alltid den vanliga filen och kan inte sättas för sig.
   if (beta) {
-    if (extras) fail("--min-client, --notice och --revoke-primary sätts på den vanliga kanalen (utan --channel beta); beta-filen följer den");
+    if (extras) fail("--min-client, --notice, --off och --revoke-primary sätts på den vanliga kanalen (utan --channel beta); beta-filen följer den");
     const stable = existsSync(stablePath) ? JSON.parse(readFileSync(stablePath, "utf8")) : {};
     for (const k of EXTRA_FIELDS) {
       if (typeof stable[k] === "string" && stable[k]) m[k] = stable[k];
@@ -319,6 +327,14 @@ function release(a) {
   extra("min-client", "minClient", (v) => (VERSION.test(v) && /^\d+\.\d+\.\d+$/.test(v) ? null : "ska vara x.y.z"));
   extra("notice", "notice", notice);
   extra("notice-en", "noticeEn", notice);
+  // Avstängda funktioner: kända namn, kommaseparerade, sorterade och utan dubbletter (samma lista ger samma signatur).
+  if (typeof a.off === "string" && a.off !== "none") {
+    const names = a.off.split(",").map((s) => s.trim()).filter(Boolean);
+    const bad = names.filter((n) => !FEATURES.includes(n));
+    if (!names.length || bad.length) fail(`--off: okänd funktion ${bad.join(", ") || "(tom)"} – kända: ${FEATURES.join(", ")}`);
+    a.off = [...new Set(names)].sort().join(",");
+  }
+  extra("off", "off", () => null);
   // Återkallelse av huvudnyckeln: anges som den publika nyckelfilen, sparas som fingeravtryck. Bara en ANNAN nyckel
   // (reservnyckeln) kan signera den – annars vore det nyckeln som återkallar sig själv, vilket klienten inte godtar.
   if (typeof a["revoke-primary"] === "string" && a["revoke-primary"] !== "none") {
@@ -474,6 +490,7 @@ function release(a) {
   // Alltid utskrivet: de här fälten ligger kvar mellan släppen och ska inte kunna glömmas.
   console.log(`  lägsta klientversion: ${m.minClient ?? "ingen"}`);
   console.log(`  besked: ${m.notice ?? "inget"}${m.noticeEn ? ` / ${m.noticeEn}` : ""}`);
+  console.log(`  avstängda funktioner: ${m.off ?? "inga"}`);
   console.log(`  signerad med nyckeln ${fingerprint(publicKey)}`);
   if (m.primaryRevoked) console.log(`  ÅTERKALLAR huvudnyckeln ${m.primaryRevoked} – klienterna godtar därefter bara reservnyckeln. Fortsätt signera med reservnyckeln tills alla klienter uppdaterat.`);
   // Beta-filen bär en kopia av lägsta version och besked: säg till när den inte längre stämmer med den vanliga.

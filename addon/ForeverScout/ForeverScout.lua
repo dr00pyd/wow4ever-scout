@@ -14,7 +14,7 @@
 local ADDON, ns = ...
 ns = ns or {}
 
-local VERSION = "1.0.29"
+local VERSION = "1.0.30"
 local FORMAT = 1
 local MAX_SPOTS = 50          -- per NPC / object, oldest dropped
 local MAX_LOOT = 2000         -- loot entries, oldest dropped
@@ -2156,6 +2156,9 @@ local function initDb()
   for _ in pairs(db.mobs) do session.mobCount = session.mobCount + 1 end
   if type(ForeverScoutOpt) ~= "table" then ForeverScoutOpt = { char = false } end
   opt = ForeverScoutOpt
+  -- 1.0.30: klienten (1.0.19) hämtar den dagliga bildlistan bara när bildtipsen är på. Tipsen är per karaktär, klienten
+  -- läser bara kontots fil – senast inloggade karaktärens val speglas här (nil = på, som standard).
+  db.tipsOff = opt.tipsOff and true or nil
   -- 1.0.20: bilder tagna med /scout bild (töms inte av /scout reset – bilderna finns redan på disken)
   if type(db.shots) ~= "table" then db.shots = {} end
   -- 1.0.27: id:n på alla NPC:er spelaren har fotat (db.shots sparar bara de 100 senaste bilderna). Fylls från db.shots
@@ -2923,6 +2926,7 @@ local function onSlash(msg)
   elseif cmd == "tips" then
     -- 1.0.25: raden "guiden saknar bild" i tooltipen (på som standard, per karaktär)
     if arg == "on" then opt.tipsOff = nil elseif arg == "off" then opt.tipsOff = true else opt.tipsOff = not opt.tipsOff or nil end
+    db.tipsOff = opt.tipsOff and true or nil   -- 1.0.30: klienten läser kontots fil (se inladdningen)
     say(opt.tipsOff and L.tips_off or L.tips_on)
   elseif cmd == "log" then
     -- 1.0.11: loggrader i chatten för testare (av som standard, per karaktär)

@@ -43,6 +43,8 @@ public sealed class SignedRelease
     /// <summary>1.0.18: kort besked från guiden på svenska respektive engelska (signerat, bara med <c>signatureAll</c>).</summary>
     public string? Notice { get; init; }
     public string? NoticeEn { get; init; }
+    /// <summary>1.0.19: avstängda funktioner (signerat fältet <c>off</c>, bara med <c>signatureAll</c>) – se <see cref="Features"/>.</summary>
+    public IReadOnlyList<string> Off { get; init; } = [];
     /// <summary>1.0.18: fingeravtrycket (<see cref="ReleaseVerifier.Fingerprint"/>) för nyckeln som signerade versionsinfon.</summary>
     public string? Signer { get; init; }
     /// <summary>1.0.18: fingeravtrycket för en nyckel som versionsinfon återkallar (signerat fält <c>primaryRevoked</c>,
@@ -407,6 +409,7 @@ public static partial class ReleaseVerifier
                 MinClient = covered != null && Str("minClient") is { } mc && VersionRx().IsMatch(mc) ? mc : null,
                 Notice = Text("notice"),
                 NoticeEn = Text("noticeEn"),
+                Off = covered != null ? Features.Parse(Str("off")) : [],
                 Signer = signer,
                 RevokedKey = covered != null && Str("primaryRevoked")?.ToLowerInvariant() is { } rk && Sha256Rx().IsMatch(rk) ? rk : null,
             };

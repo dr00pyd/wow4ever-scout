@@ -42,6 +42,10 @@ internal static class Texts
         ["mac.onb.autostart"] = ("Starta vid inloggning (rekommenderas)", "Open at login (recommended)"),
         ["mac.autostart.ask"] = ("Forever Scout startar inte när du loggar in på datorn just nu. Då skickas inget när du spelar förrän du startar appen själv.\n\nVill du att den startar vid inloggning? Du kan ändra det i Inställningar.", "Forever Scout does not open when you log in right now. Nothing is sent while you play until you start the app yourself.\n\nDo you want it to open at login? You can change this in Settings."),
         ["mac.autostart.ask.title"] = ("Starta vid inloggning?", "Open at login?"),
+        // 1.0.19: Dock-ikonen (menyradsikonen kan hamna bakom kameraskåran eller döljas av macOS)
+        ["mac.set.dock"] = ("Visa i Dock (rekommenderas)", "Show in the Dock (recommended)"),
+        ["mac.set.dock.hint"] = ("Då syns det alltid att Forever Scout körs, även när lägerelden i menyraden är dold. Avsluta med högerklick på ikonen i Dock. Gäller efter omstart av appen (sker direkt).",
+                                 "Then you can always see that Forever Scout is running, even when the campfire in the menu bar is hidden. Quit by right-clicking the icon in the Dock. Takes effect after the app restarts (happens right away)."),
         ["mac.gamedir.toast"] = ("Välj din WoW-katalog så att Forever Scout kan börja. Klicka på lägerelden i menyraden.", "Choose your WoW folder so Forever Scout can start. Click the campfire in the menu bar."),
         // ---- Linux (XDG-autostart, systemfältet)
         ["linux.onb.autostart"] = ("Starta vid inloggning (rekommenderas)", "Start at login (recommended)"),
@@ -136,7 +140,8 @@ internal static class Links
     public static string Faq(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/vanliga-fragor" : "/en/contribute/faq").ToString();
     public static string Terms(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/villkor" : "/en/contribute/terms").ToString();
     public static string Privacy(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/integritet" : "/en/contribute/privacy").ToString();
-    public static string Report(ApiClient api) => Contribute(api) + "#rapportera-fel";
+    /// <summary>1.0.19: plattform och version följer med (<see cref="BugLink"/>).</summary>
+    public static string Report(ApiClient api) => Contribute(api) + BugLink.Query + "#rapportera-fel";
     public static string Download(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/ladda-ner" : "/en/contribute/download").ToString();
     /// <summary>1.0.18: "Mina bilder" – spelarens Scout-bilder på sajten.</summary>
     public static string Pictures(ApiClient api) => api.Site(Overview.PicturesPath(Strings.IsSv)).ToString();
