@@ -14,7 +14,7 @@
 local ADDON, ns = ...
 ns = ns or {}
 
-local VERSION = "1.0.27"
+local VERSION = "1.0.28"
 local FORMAT = 1
 local MAX_SPOTS = 50          -- per NPC / object, oldest dropped
 local MAX_LOOT = 2000         -- loot entries, oldest dropped
@@ -208,7 +208,9 @@ end
 
 local function num(v)
   v = clean(v)
-  if type(v) == "number" and v == v then return v end
+  -- 1.0.28: aldrig NaN eller ±inf – spelet skriver dem som 1/0 i filen, som klienten inte kan läsa (filen hoppades
+  -- då över för alltid, utan fel)
+  if type(v) == "number" and v == v and v > -math.huge and v < math.huge then return v end
   return nil
 end
 
@@ -1399,6 +1401,29 @@ end
 
 -- Adds the player's position as an approximate area unless a saved area on the same map is within MOB_RADIUS.
 -- The time is rounded to the day: an area says where a mob lives, not when the player was there.
+-- 1.0.28: vid MAX_MOBS ger den mob plats som ändrades för längst sedan (lägst löpnummer bland dess områden och
+-- platser) – förr sparades inga nya mobs alls när taket var nått. Servern har redan allt som laddats upp.
+function session.mobEvict()
+  local worst, worstQ = nil, nil
+  for id, rec in pairs(db.mobs) do
+    local q = 0
+    if type(rec) == "table" then
+      for _, k in ipairs({ "a", "e" }) do
+        if type(rec[k]) == "table" then
+          for _, s in ipairs(rec[k]) do
+            if type(s) == "table" and type(s.q) == "number" and s.q > q then q = s.q end
+          end
+        end
+      end
+    end
+    if not worstQ or q < worstQ then worst, worstQ = id, q end
+  end
+  if worst == nil then return false end
+  db.mobs[worst] = nil
+  session.mobCount = session.mobCount - 1
+  return true
+end
+
 local function addArea(rec)
   local m, x, y = playerPos()
   if not m then return false end
@@ -1454,7 +1479,7 @@ local function noteMob(unit)
   local rec = db.mobs[id]
   local isNew = not rec
   if isNew then
-    if session.mobCount >= MAX_MOBS then return end
+    if session.mobCount >= MAX_MOBS and not session.mobEvict() then return end
     rec = {}; db.mobs[id] = rec; session.mobCount = session.mobCount + 1
   end
   rec.n = name
@@ -1573,7 +1598,7 @@ noteLootedMob = function(guid, id, grp)
   local rec = db.mobs[id]
   local isNew = not rec
   if isNew then
-    if session.mobCount >= MAX_MOBS then return end
+    if session.mobCount >= MAX_MOBS and not session.mobEvict() then return end
     rec = {}; db.mobs[id] = rec; session.mobCount = session.mobCount + 1
   end
   rec.n = name
@@ -2325,6 +2350,7 @@ end
 ;(function()
   local MAX_SHOTS = 100         -- poster i db.shots, äldsta ut
   local TIMEOUT = 2             -- sekunder innan gränssnittet visas igen även utan svar från spelet
+  local LATE = 10               -- 1.0.28: så länge väntar bilden på spelets svar (en stor bild kan ta mer än 2 s att spara)
   local STALE = 3               -- sekunder innan en väntande bild utan svar får ersättas av en ny
   local CODE = "abcdefghijklmnopqrstuvwxyz0123456789"
   -- tooltip-typer som aldrig är ett objekt i världen (Enum.TooltipDataType, slås upp med namn – saknas de hoppas kollen över)
@@ -2351,31 +2377,73 @@ end
     if type(f) == "function" then pcall(f, k, v) end
   end
 
-  -- Stänger av namnen. Aldrig i strid (namnskyltarnas inställningar är skyddade där) och aldrig utan databas.
+  -- Stänger av namnen. Aldrig utan databas. 1.0.28: i strid stängs namnen över huvudena (UnitName*) av ändå – bara
+  -- namnskyltarna (nameplate*) är skyddade där; förr togs bilder i strid med alla namn kvar. Bildformatet sätts till
+  -- JPEG medan bilden tas (TGA i hög upplösning blev för stort och gick förlorat) och återställs med namnen.
   function session.shotHideNames()
-    if type(db) ~= "table" or unitFlag(InCombatLockdown) ~= false then return false end
+    if type(db) ~= "table" then return false end
+    local fight = unitFlag(InCombatLockdown) ~= false
     if type(db.shotCvars) == "table" then session.shotRestoreNames() end
-    local saved, any = {}, false
+    local saved = {}
     for _, k in ipairs(NAME_CVARS) do
-      local v = cvarGet(k)
-      if v and v ~= "0" then saved[k] = v; any = true end
+      if not (fight and k:sub(1, 9) == "nameplate") then
+        local v = cvarGet(k)
+        if v and v ~= "0" then saved[k] = v end
+      end
     end
-    if not any then return false end
+    local fmt = cvarGet("screenshotFormat")
+    if fmt and fmt ~= "jpeg" and fmt ~= "jpg" then saved.screenshotFormat = fmt end
+    if next(saved) == nil then return false end
     db.shotCvars = saved
-    for k in pairs(saved) do cvarSet(k, "0") end
+    for k in pairs(saved) do cvarSet(k, k == "screenshotFormat" and "jpeg" or "0") end
     return true
+  end
+
+  -- 1.0.28: true om något namn har slagits på igen sedan shotHideNames (ett namnskyltsaddon kan göra det).
+  function session.shotNamesBack()
+    if type(db) ~= "table" or type(db.shotCvars) ~= "table" then return false end
+    for k in pairs(db.shotCvars) do
+      if k ~= "screenshotFormat" then
+        local v = cvarGet(k)
+        if v and v ~= "0" then return true end
+      end
+    end
+    return false
+  end
+
+  -- 1.0.28: andra spelares namnskyltar går inte att stänga av i strid – då tas ingen bild.
+  function session.shotFriendPlates()
+    return unitFlag(InCombatLockdown) ~= false and (cvarGet("nameplateShowFriends") or "0") ~= "0"
+  end
+
+  -- 1.0.28: ligger muspekaren inom den del av skärmen som bilden beskärs till? Klienten sparar bara mitten (62 % av
+  -- höjden med överkanten 11,4 % ner, bredd 1,45 × den höjden – GdiShotEncoder/SkiaShotEncoder). Okänt = ja.
+  function session.shotCursorInCrop()
+    local x, y = try(GetCursorPosition)
+    x, y = num(x), num(y)
+    local w, h = num(try(GetScreenWidth)), num(try(GetScreenHeight))
+    local ui = UIParent
+    local sc = type(ui) == "table" and type(ui.GetEffectiveScale) == "function" and num(try(ui.GetEffectiveScale, ui)) or nil
+    if not (x and y and w and h and sc) or w <= 0 or h <= 0 or sc <= 0 then return true end
+    local fx, fy = x / (w * sc), 1 - y / (h * sc)
+    if fx < 0 or fx > 1 or fy < 0 or fy > 1 then return true end
+    local half = (0.62 * 1.45 * h / w) / 2
+    return fx >= 0.5 - half and fx <= 0.5 + half and fy >= 0.114 and fy <= 0.734
   end
 
   -- Sätter tillbaka namnen som de var. Körs när bilden är klar och vid inloggning om något blev kvar.
   function session.shotRestoreNames()
     if type(db) ~= "table" or type(db.shotCvars) ~= "table" then return end
     if unitFlag(InCombatLockdown) ~= false then
-      -- i strid går namnskyltarna inte att ändra: försök igen strax
-      later(1, session.shotRestoreNames)
+      -- i strid går namnskyltarna inte att ändra: namnen över huvudena nu, resten strax. (1.0.28: anropade förut
+      -- later, som definieras längre ned – felet stoppade återställningen; nu C_Timer direkt.)
       for k, v in pairs(db.shotCvars) do
         if type(k) == "string" and k:sub(1, 8) == "UnitName" and type(v) == "string" then cvarSet(k, v); db.shotCvars[k] = nil end
       end
-      if next(db.shotCvars) == nil then db.shotCvars = nil end
+      if next(db.shotCvars) == nil then db.shotCvars = nil; return end
+      if C_Timer and type(C_Timer.After) == "function" then
+        pcall(C_Timer.After, 1, function() pcall(session.shotRestoreNames) end)
+      end
       return
     end
     for k, v in pairs(db.shotCvars) do
@@ -2535,6 +2603,7 @@ end
   --   3. det muspekaren pekade på för högst 3 s sedan (man klickar på en makroknapp: pekaren har lämnat målet)
   --   4. det markerade målet              5. objektet muspekaren senast pekade på (högst 15 s sedan)
   function session.shotTarget()
+    session.shotFromCursor = true   -- 1.0.28: muspekaren, objektet under den eller det den nyss pekade på
     local rec, r1, h1 = unitRec("mouseover")
     if rec then return rec end
     local obj = session.shotObject()
@@ -2543,6 +2612,7 @@ end
     local t = num(try(GetTime)) or 0
     local age = type(seen) == "table" and t - (seen.at or 0) or nil
     if age and age <= 3 then return { k = seen.k or "object", id = seen.id, n = seen.n } end
+    session.shotFromCursor = false
     local tar, r2, h2 = unitRec("target")
     if tar then return tar end
     -- målet går inte att läsa just nu, men det är samma mål som när det markerades: använd det addonen såg då
@@ -2733,7 +2803,7 @@ end
     if p.done then return end
     p.done = true
     local L = T()
-    if ok ~= true or type(db) ~= "table" then answer(L.shot_failed, p.to); return end
+    if ok ~= true or type(db) ~= "table" then answer((p.why and L["shot_" .. p.why]) or L.shot_failed, p.to); return end
     local r = p.rec
     r.t = now()
     local c = {}
@@ -2765,11 +2835,21 @@ end
     local rec, why = session.shotTarget()
     if not rec then say(why == "hidden" and (L.shot_hidden or L.shot_none) or why == "player" and L.shot_player or L.shot_none); return end
     if type(Screenshot) ~= "function" then say(L.shot_failed); return end
+    -- 1.0.28: bilden beskärs till skärmens mitt – ett mål vid skärmkanten hamnar inte i den
+    if session.shotFromCursor and not session.shotCursorInCrop() then say(L.shot_center or L.shot_failed); return end
+    if session.shotFriendPlates() then say(L.shot_plates or L.shot_failed); return end
     rec.m, rec.x, rec.y = playerPos()   -- spelarens egen position; ingen i instanser, under flygtur eller i fordon
     local p = { rec = rec, at = t, to = session.replyTo }
     session.shotPending = p
     -- säkerhetstimern först: bara om den startade göms gränssnittet
-    local guarded = later(TIMEOUT, function() if session.shotPending == p then session.shotDone(p, nil) end end)
+    -- 1.0.28: efter TIMEOUT visas gränssnittet igen, men bilden väntar på spelets svar till LATE (stor bild, långsam disk)
+    local guarded = later(TIMEOUT, function()
+      if session.shotPending ~= p then return end
+      session.shotShow(p)
+      if not later(LATE - TIMEOUT, function() if session.shotPending == p then session.shotDone(p, nil) end end) then
+        session.shotDone(p, nil)
+      end
+    end)
     if not guarded then
       -- ingen timer i klienten: bilden tas direkt, med gränssnittet kvar
       if not pcall(Screenshot) then session.shotDone(p, false) end
@@ -2786,6 +2866,8 @@ end
     -- namnen försvinner inte samma bildruta som inställningen ändras: vänta lite längre när de stängts av
     local queued = later(hid and 0.15 or 0, function()   -- då är gränssnittet (och namnen) borta ur bilden
       if session.shotPending ~= p then return end
+      -- 1.0.28: har ett annat addon slagit på namnen igen tas ingen bild
+      if session.shotNamesBack() then p.why = "names_back"; session.shotDone(p, false); return end
       if not pcall(Screenshot) then session.shotDone(p, false) end
     end)
     if not queued then session.shotDone(p, false) end

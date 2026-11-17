@@ -67,6 +67,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateRawSync } from "node:zlib";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SIGNED_FIELDS = ["addon", "addonFile", "addonSha256", "addonSig", "client", "clientFile", "clientSig", "issued", "sha256", "v"];
@@ -167,6 +168,55 @@ export function zipEntryNames(buf) {
     p += 46 + n + x + c;
   }
   return names;
+}
+
+/** Innehållet i en post i zip:en (stored eller deflate), eller null om posten saknas. */
+export function zipEntry(buf, wanted) {
+  const min = Math.max(0, buf.length - 65557);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= min; i--) if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("hittar inte zip:ens slutpost");
+  const count = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+  for (let k = 0; k < count; k++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error("trasig centralkatalog");
+    const method = buf.readUInt16LE(p + 10), csize = buf.readUInt32LE(p + 20);
+    const n = buf.readUInt16LE(p + 28), x = buf.readUInt16LE(p + 30), c = buf.readUInt16LE(p + 32), local = buf.readUInt32LE(p + 42);
+    if (buf.subarray(p + 46, p + 46 + n).toString("utf8") === wanted) {
+      if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error("trasig lokal post");
+      const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+      const data = buf.subarray(start, start + csize);
+      if (method === 0) return Buffer.from(data);
+      if (method === 8) return inflateRawSync(data, { maxOutputLength: 64 * 1024 * 1024 });
+      throw new Error(`okänd komprimering ${method}`);
+    }
+    p += 46 + n + x + c;
+  }
+  return null;
+}
+
+/**
+ * 2026-11-17: addonens version i zip:en måste vara den som signeras – .toc-filerna och `local VERSION` i
+ * ForeverScout.lua. Annars installerar klienterna om addonen var tredje timme med en /reload-påminnelse som aldrig
+ * försvinner (klienten läser versionen ur .toc, addonen rapporterar VERSION). Returnerar ett felmeddelande eller null.
+ */
+export function checkAddonZip(buf, version) {
+  let main;
+  try {
+    main = zipEntry(buf, "ForeverScout/ForeverScout.lua");
+  } catch (e) {
+    return `--addon: ${e.message}`;
+  }
+  if (!main) return "--addon: ForeverScout/ForeverScout.lua saknas i zip:en";
+  const v = /local VERSION = "([^"]+)"/.exec(main.toString("utf8"))?.[1];
+  if (v !== version) return `--addon: ForeverScout.lua har VERSION ${v ?? "?"}, men --addon-version är ${version}`;
+  const tocs = zipEntryNames(buf).filter((n) => /^ForeverScout\/[^/]+\.toc$/.test(n));
+  if (!tocs.length) return "--addon: ingen .toc-fil i ForeverScout/";
+  for (const t of tocs) {
+    const tv = /^## Version:\s*(\S+)/m.exec(zipEntry(buf, t).toString("utf8"))?.[1];
+    if (tv !== version) return `--addon: ${t} har version ${tv ?? "?"}, men --addon-version är ${version}`;
+  }
+  return null;
 }
 
 /** Kontrollerar att zip:en är ett macOS-paket som är kodsignerat och (om inte allowUnnotarized) staplat. */
@@ -323,6 +373,8 @@ function release(a) {
     if (typeof a.addon !== "string" || !existsSync(a.addon)) fail(`hittar inte --addon ${a.addon}`);
     const buf = readFileSync(a.addon);
     if (buf[0] !== 0x50 || buf[1] !== 0x4b) fail("--addon ska vara en zip (mappen ForeverScout/ med .toc/.lua)");
+    const addonProblem = checkAddonZip(buf, addonVersion);
+    if (addonProblem) fail(addonProblem);
     const h = sha256(buf);
     copyFileSync(a.addon, join(out, fileName(ADDON_FILE)));
     Object.assign(m, { addon: addonVersion, addonFile: fileName(ADDON_FILE), addonSha256: h, addonSig: signB64(privateKey, fileMessage("addon", addonVersion, h)) });
@@ -400,6 +452,13 @@ function release(a) {
   if (!verifyB64(publicKey, Buffer.from(canonical5(m), "utf8"), signature5)) fail("självkontrollen av signature5 misslyckades");
   // signatureAll: alla fält i listan "signed" – klienter från 1.0.18 på alla plattformar. Listan signeras med.
   m.signed = signedList(m).join(",");
+  // 2026-11-17: klient 1.0.18 godtar bara strängar, heltal och null i signatureAll (ReleaseVerifier.Canonical) – ett
+  // fält av annan typ gör att ALLA 1.0.18-klienter slutar ta emot uppdateringar, utan något synligt fel.
+  for (const k of m.signed.split(",")) {
+    const v = m[k];
+    if (!(v === undefined || v === null || typeof v === "string" || (typeof v === "number" && Number.isSafeInteger(v))))
+      fail(`fältet ${k} har typen ${typeof v} – klient 1.0.18 godtar bara strängar och heltal i signatureAll`);
+  }
   const signatureAll = signB64(privateKey, Buffer.from(canonicalAll(m), "utf8"));
   if (!verifyB64(publicKey, Buffer.from(canonicalAll(m), "utf8"), signatureAll)) fail("självkontrollen av signatureAll misslyckades");
   const manifest = { ...m, blockedAddons: [...blocked], signature, signature2, signature3, signature4, signature5, signatureAll };

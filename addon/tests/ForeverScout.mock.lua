@@ -5,6 +5,12 @@
 -- (aldrig spelare/husdjur/secret values, inte i strid, ungefärliga områden med dedup och tak), brevlådor och
 -- tjänsteroller via PLAYER_INTERACTION_MANAGER_FRAME_SHOW.
 local DIR = "client/addon/ForeverScout/"
+local ADDON_V
+do
+  local f = assert(io.open(DIR .. "ForeverScout.toc", "r"))
+  ADDON_V = f:read("*a"):match("## Version: ([%d%.]+)")
+  f:close()
+end
 
 local fails, passes = 0, 0
 local function check(cond, msg)
@@ -83,7 +89,7 @@ ForeverScoutDB = { seq = 7, objects = { [999001] = { n = "Old Chest" }, [999003]
 fire("ADDON_LOADED", "ForeverScout")
 local T = ns._test
 local db = T.db()
-check(db.addon == "1.0.27", "addonversion 1.0.27")
+check(db.addon == ADDON_V, "addonversionen är den i .toc (" .. tostring(ADDON_V) .. ")")
 check(db.objects[999001].q and db.objects[999001].q > 7 and db.npcs[999002].q and db.npcs[999002].q > 7, "1.0.10: gamla poster utan position får löpnummer vid start")
 check(db.objects[999003].q == nil, "1.0.10: poster med position behåller löpnumret i sina platser")
 check(type(db.mobs) == "table" and type(db.mail) == "table", "mobs och mail finns")
@@ -98,7 +104,7 @@ do
   check(frame.events.PLAYER_LOGIN, "händelsen registrerad: PLAYER_LOGIN")
   fire("PLAYER_LOGIN")
   DEFAULT_CHAT_FRAME.AddMessage = old
-  check(#said == 1 and said[1]:find("1.0.27", 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
+  check(#said == 1 and said[1]:find(ADDON_V, 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
 end
 
 ---------------------------------------------------------------------------
@@ -1075,7 +1081,7 @@ do
   SlashCmdList.FOREVERSCOUT("")
   CreateFrame = oldCF
   DEFAULT_CHAT_FRAME.GetNumMessages, DEFAULT_CHAT_FRAME.GetMaxLines, DEFAULT_CHAT_FRAME.AddMessage = nil, nil, old
-  check(shown and txt and txt:find("1.0.27", 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
+  check(shown and txt and txt:find(ADDON_V, 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
         "1.0.18: syns inte raden i chatten visas svaret i Forever Scout-fönstret (stängs med Esc)")
 end
 
@@ -1248,13 +1254,18 @@ do
   run(2)
   check(UIParent.alpha == 0.8, "1.0.20: säkerhetstimern efter ett misslyckande ändrar inget")
 
-  -- Inget svar alls (timeout 2 s): gränssnittet återställs ändå, inget antecknas – inte heller av ett sent svar
+  -- Inget svar inom 2 s: gränssnittet visas igen. 1.0.28: bilden väntar till 10 s, så ett sent svar antecknas ändå
   shoot(); run(0)
   check(UIParent.alpha == 0, "1.0.20: gömt i väntan på svaret (timeout)")
   run(2)
-  check(UIParent.alpha == 0.8 and #db.shots == n0 and T.session.shotPending == nil, "1.0.20: säkerhetstimern efter 2 s återställer gränssnittet")
+  check(UIParent.alpha == 0.8 and #db.shots == n0 and T.session.shotPending ~= nil, "1.0.28: efter 2 s visas gränssnittet igen och bilden väntar fortfarande")
   fire("SCREENSHOT_SUCCEEDED")
-  check(#db.shots == n0, "1.0.20: ett svar efter timeouten antecknas inte")
+  check(#db.shots == n0 + 1 and T.session.shotPending == nil, "1.0.28: ett svar efter 2 s (men inom 10 s) antecknas")
+  n0 = #db.shots
+  shoot(); run(0); run(2); run(8)
+  check(UIParent.alpha == 0.8 and #db.shots == n0 and T.session.shotPending == nil, "1.0.20: inget svar alls – bilden ges upp efter 10 s")
+  fire("SCREENSHOT_SUCCEEDED")
+  check(#db.shots == n0, "1.0.20: ett svar efter att bilden getts upp antecknas inte")
 
   -- Screenshot() ger ett fel: gränssnittet återställs direkt
   shotFails = true
@@ -1343,12 +1354,62 @@ do
   -- utan svar från spelet: säkerhetstimern sätter tillbaka namnen
   shoot(); run(2)
   check(cvars.UnitNameNPC == "1" and db.shotCvars == nil and UIParent.alpha == 0.8, "1.0.21: timeouten sätter tillbaka namnen")
-  -- i strid rörs inga inställningar
+  run(8)
+  -- 1.0.28: i strid stängs namnen över huvudena av ändå; namnskyltarna (skyddade i strid) rörs inte
   combat = true
   shoot()
-  check(cvars.UnitNameNPC == "1" and db.shotCvars == nil, "1.0.21: i strid stängs inga namn av")
-  run(0); fire("SCREENSHOT_SUCCEEDED"); run(2)
+  check(cvars.UnitNameNPC == "0" and cvars.nameplateShowAll == "1" and type(db.shotCvars) == "table" and db.shotCvars.nameplateShowAll == nil,
+        "1.0.28: i strid stängs namnen över huvudena av, namnskyltarna rörs inte")
+  run(0); run(1); fire("SCREENSHOT_SUCCEEDED"); run(2)
+  check(cvars.UnitNameNPC == "1" and db.shotCvars == nil, "1.0.28: namnen tillbaka efter en bild i strid")
+  -- vänliga namnskyltar (andra spelares namn) går inte att stänga av i strid: ingen bild, ett besked
+  cvars.nameplateShowFriends = "1"
+  local nIn = #db.shots
+  shoot()
+  check(cvars.UnitNameNPC == "1" and T.session.shotPending == nil and #db.shots == nIn and last():find("Friendly nameplates", 1, true),
+        "1.0.28: vänliga namnskyltar i strid – ingen bild")
+  cvars.nameplateShowFriends = nil
   combat = false
+  run(5)
+  -- 1.0.28: bildformatet är JPEG medan bilden tas och sätts sedan tillbaka
+  cvars.screenshotFormat = "tga"
+  local fmtAtShot
+  local shotWithNames = Screenshot
+  Screenshot = function() fmtAtShot = cvars.screenshotFormat; return shotWithNames() end
+  shoot(); run(0); run(1); fire("SCREENSHOT_SUCCEEDED"); run(2)
+  check(fmtAtShot == "jpeg" and cvars.screenshotFormat == "tga" and db.shotCvars == nil, "1.0.28: JPEG medan bilden tas, sedan tillbaka till spelarens format")
+  Screenshot = shotWithNames
+  cvars.screenshotFormat = nil
+  -- 1.0.28: slår ett annat addon på namnen igen innan bilden tas blir det ingen bild
+  nIn = #db.shots
+  local shots0 = shots
+  shoot(); run(0)
+  cvars.UnitNameNPC = "1"
+  run(1)
+  check(shots == shots0 and #db.shots == nIn and T.session.shotPending == nil and last():find("turned the names back on", 1, true),
+        "1.0.28: namnen påslagna igen – ingen bild, ett besked")
+  check(cvars.UnitNameFriendlyPlayerName == "1" and db.shotCvars == nil and UIParent.alpha == 0.8, "1.0.28: namn och gränssnitt tillbaka efter den uteblivna bilden")
+  -- 1.0.28: muspekaren utanför den del av skärmen som sparas: ingen bild, ett besked
+  local cx, cy = 100, 100
+  GetCursorPosition = function() return cx, cy end
+  GetScreenWidth = function() return 1920 end
+  GetScreenHeight = function() return 1080 end
+  UIParent.GetEffectiveScale = function() return 1 end
+  units.mouseover = { guid = "Creature-0-1-2-3-4321-0000000009", name = "Kzixx", level = 12 }
+  nIn = #db.shots
+  shoot()
+  check(T.session.shotPending == nil and #db.shots == nIn and last():find("middle of the screen", 1, true), "1.0.28: mål vid skärmkanten – ingen bild")
+  cx, cy = 960, 600
+  local lastC = db.shots[#db.shots].c
+  shoot(); run(0); run(1); fire("SCREENSHOT_SUCCEEDED"); run(2)
+  check(db.shots[#db.shots].c ~= lastC and db.shots[#db.shots].id == 4321, "1.0.28: mål i mitten – bilden tas")
+  cx, cy = 100, 100
+  units.mouseover = nil
+  T.session.shotSeen = nil
+  lastC = db.shots[#db.shots].c
+  shoot(); run(0); run(1); fire("SCREENSHOT_SUCCEEDED"); run(2)
+  check(db.shots[#db.shots].c ~= lastC and db.shots[#db.shots].id == 1234, "1.0.28: det markerade målet (inte muspekaren) kontrolleras inte")
+  GetCursorPosition, GetScreenWidth, GetScreenHeight, UIParent.GetEffectiveScale = nil, nil, nil, nil
   -- kvarblivna värden (krasch mitt i en bild) sätts tillbaka vid inloggning
   cvars.UnitNameNPC = "0"; db.shotCvars = { UnitNameNPC = "1" }
   fire("PLAYER_LOGIN"); run(5)
@@ -1597,7 +1658,7 @@ do
     local txt = f and f:read("*a") or ""
     if f then f:close() end
     local a, b = txt:find("\nReceipt.lua", 1, true), txt:find("\nForeverScout.lua", 1, true)
-    check(a and b and a < b and txt:find("## Version: 1.0.27", 1, true), "1.0.27: " .. toc .. " har version 1.0.27 och laddar Receipt.lua före ForeverScout.lua")
+    check(a and b and a < b and txt:find("## Version: " .. ADDON_V, 1, true), "1.0.26: " .. toc .. " har samma version som ForeverScout.toc och laddar Receipt.lua före ForeverScout.lua")
   end
 
   -- Standardfilen som följer med addonen: går att ladda, sätter ingenting, och då sägs ingenting
@@ -1611,7 +1672,7 @@ do
   said = {}
   ForeverScoutOpt.rcpt = nil
   fire("PLAYER_LOGIN")
-  check(#said == 1 and said[1]:find("1.0.27", 1, true), "1.0.26: utan kvitto säger inloggningen bara att addonen är igång")
+  check(#said == 1 and said[1]:find(ADDON_V, 1, true), "1.0.26: utan kvitto säger inloggningen bara att addonen är igång")
 
   -- Ett kvitto som klienten har skrivit (exakt den text AddonReceipt.Render ger)
   local text = "-- ForeverScout: receipt for the latest upload. Written by the Forever Scout client after each upload -\n"
@@ -1678,6 +1739,27 @@ do
 
   ForeverScoutReceipt, ForeverScoutOpt.rcpt, ForeverScoutOpt.lang = nil, nil, nil
   DEFAULT_CHAT_FRAME.AddMessage, C_Timer.After = oldAdd, oldTimer
+end
+
+-- 1.0.28: tal som inte är ändliga sparas aldrig; vid mob-taket ger den mob plats som ändrats för längst sedan
+do
+  local S = T.session
+  combat, instance = false, nil
+  units.mouseover = nil
+  units.target = { guid = "Creature-0-1-2-3-260001-0000000001", name = "Infinite Imp", level = math.huge, class = "normal", ctype = "Demon", ctypeId = 3, reaction = 2 }
+  fire("PLAYER_TARGET_CHANGED")
+  local imp = db.mobs[260001]
+  check(imp ~= nil and imp.lmin == nil, "1.0.28: en oändlig nivå sparas inte")
+  local keepMobs, keepCount = db.mobs, S.mobCount
+  db.mobs = {}
+  for i = 1, 3000 do db.mobs[700000 + i] = { n = "Fake " .. i, a = { { m = 1, x = 1, y = 1, t = 0, q = 1000 + i } } } end
+  db.mobs[700005].a[1].q = 1
+  S.mobCount = 3000
+  units.target = { guid = "Creature-0-1-2-3-260002-0000000001", name = "Newcomer", level = 3, class = "normal", ctype = "Beast", ctypeId = 1, reaction = 2 }
+  fire("PLAYER_TARGET_CHANGED")
+  check(db.mobs[260002] ~= nil and db.mobs[700005] == nil and S.mobCount == 3000, "1.0.28: vid taket ersätter en ny mob den som ändrats för längst sedan")
+  db.mobs, S.mobCount = keepMobs, keepCount
+  units.target = nil
 end
 
 print(string.format("ForeverScout mock: %d ok, %d fel", passes, fails))

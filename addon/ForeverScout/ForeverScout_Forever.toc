@@ -3,7 +3,7 @@
 ## Notes: Collects NPC, mob, trainer, vendor, quest, object, mailbox, loot and flight data, plus your own completed quests and known recipes and bag sizes, for guide.wow4ever.se. No character names, no realm.
 ## Notes-svSE: Samlar NPC-, mob-, tränar-, försäljar-, quest-, objekt-, brevlåde-, loot- och flygdata samt dina klarade quests och kända recept och väskornas storlek till guide.wow4ever.se. Inga karaktärsnamn, ingen realm.
 ## Author: WoW Forever LAN guild
-## Version: 1.0.27
+## Version: 1.0.28
 ## IconTexture: Interface\AddOns\ForeverScout\ForeverScout
 ## SavedVariables: ForeverScoutDB
 ## SavedVariablesPerCharacter: ForeverScoutOpt

@@ -15,7 +15,8 @@ public class BetaManifestTests
     {
         var path = Path.Combine(Repo(), "public", "scout", "version-beta.json");
         if (!File.Exists(path)) return; // ingen beta ute
-        var r = ReleaseVerifier.Verify(File.ReadAllText(path), UpdateKeys.PublicKeyPem);
+        // Huvud- eller reservnyckeln (2026-11-17): en nödsignering med reservnyckeln ska inte stoppas av testet.
+        var r = ReleaseVerifier.Verify(File.ReadAllText(path), UpdateKeys.All);
         Assert.Equal("ForeverScout-beta.exe", r.File(ReleaseKind.Client)?.FileName);
         Assert.Equal("ForeverScout-lite-beta.exe", r.File(ReleaseKind.Lite)?.FileName);
         Assert.Equal("ForeverScout-addon-beta.zip", r.File(ReleaseKind.Addon)?.FileName);
@@ -38,7 +39,7 @@ public class BetaManifestTests
         var win = ReleaseVerifier.Verify(json, UpdateKeys.All);
         var mac = ReleaseVerifier.VerifyMac(json, UpdateKeys.All);
         var lin = ReleaseVerifier.VerifyLinux(json, UpdateKeys.All);
-        Assert.Equal(UpdateKeys.PrimaryFingerprint, win.Signer);
+        Assert.Contains(win.Signer, new[] { UpdateKeys.PrimaryFingerprint, UpdateKeys.BackupFingerprint });
         Assert.Equal(win.Client, lin.Client);
         Assert.Equal(win.Addon, mac.Addon);
         int checkedFiles = 0;
