@@ -135,12 +135,16 @@ public sealed class Release119Tests : IDisposable
         Assert.Null(ShotListFile.ParseOwn(text.Replace("1000,", "1000,print(1),")));
     }
 
-    /// <summary>Addonens källmapp i repot (client/addon/ForeverScout).</summary>
+    /// <summary>
+    /// Addonens källmapp: client/addon/ForeverScout i guidens repo, addon/ForeverScout i det publika repot (GitHub,
+    /// som Mac-bygget hämtar).
+    /// </summary>
     private static string AddonDir()
     {
-        var d = new DirectoryInfo(AppContext.BaseDirectory);
-        while (d != null && !Directory.Exists(Path.Combine(d.FullName, "client", "addon", "ForeverScout"))) d = d.Parent;
-        return Path.Combine(d!.FullName, "client", "addon", "ForeverScout");
+        for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+            foreach (var rel in new[] { Path.Combine("client", "addon", "ForeverScout"), Path.Combine("addon", "ForeverScout") })
+                if (File.Exists(Path.Combine(d.FullName, rel, "ShotList.lua"))) return Path.Combine(d.FullName, rel);
+        throw new DirectoryNotFoundException("addon/ForeverScout hittades inte ovanför " + AppContext.BaseDirectory);
     }
 
     [Fact]
