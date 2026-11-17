@@ -14,7 +14,7 @@
 local ADDON, ns = ...
 ns = ns or {}
 
-local VERSION = "1.0.28"
+local VERSION = "1.0.29"
 local FORMAT = 1
 local MAX_SPOTS = 50          -- per NPC / object, oldest dropped
 local MAX_LOOT = 2000         -- loot entries, oldest dropped
@@ -2487,7 +2487,8 @@ end
     if not s then return nil end
     s = s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("^%s+", "")
     s = (s:gsub("%s+$", ""))
-    if s == "" or #s > 80 or s:find("|", 1, true) then return nil end
+    -- 1.0.28: 80 TECKEN, inte byte – kyrilliska och asiatiska namn (2–3 byte per tecken) nekades förut redan vid 27–40
+    if s == "" or select(2, s:gsub("[^\128-\191]", "")) > 80 or s:find("|", 1, true) then return nil end
     return s
   end
 

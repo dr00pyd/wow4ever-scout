@@ -37,6 +37,15 @@ Mappen innehåller två TOC-filer. Forever läser `ForeverScout_Forever.toc` och
 
 Addonen skriver inget i chatten om du inte själv skriver ett kommando – utom vid inloggning och `/reload`: en rad om att den är igång och (från 1.0.26) en rad med kvittot på den senaste uppladdningen. Den skriver aldrig i andras chatt utom med `/scout tipsa`. Fel fångas och visas aldrig som felrutor.
 
+## 1.0.28–1.0.29 i korthet
+
+- Tal som inte är ändliga (NaN, ±inf) sparas aldrig – klienten kunde inte läsa en sådan fil.
+- Vid 3 000 mobs ger den mob plats som ändrats för längst sedan (förr sparades inga nya).
+- `/scout bild`: namnen över huvudena stängs av även i strid; vänliga namnskyltar i strid (andra spelares namn, går
+  inte att stänga av där) ger ingen bild; bilden tas som JPEG; slår ett annat addon på namnen igen tas ingen bild; ett
+  mål under muspekaren måste ligga inom den del av skärmen som sparas; ett svar upp till 10 s efter bilden räknas.
+- NPC-namn räknas i tecken (högst 80), inte byte – kyrilliska och asiatiska namn nekades förut.
+
 ## Kvittot (1.0.26)
 
 Addonen kan bara läsa filer som spelet laddar vid inloggning och `/reload`. Därför skriver Forever Scout-klienten (från 1.0.18) efter varje lyckad uppladdning en liten fil i addonens egen mapp, `Receipt.lua`, som står i båda `.toc`-filerna före `ForeverScout.lua`:

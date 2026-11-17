@@ -1762,5 +1762,22 @@ do
   units.target = nil
 end
 
+-- 1.0.28: namnlängden räknas i tecken – ett ryskt namn på 40 tecken (80 byte) godtas, 81 tecken nekas
+do
+  local S = T.session
+  combat, instance = false, nil
+  units.mouseover = nil
+  local ru = string.rep("\208\148", 40)        -- "Д" × 40 = 80 byte
+  units.target = { guid = "Creature-0-1-2-3-4444-000000000C", name = ru, level = 10 }
+  S.shotSeen = nil
+  local r = S.shotTarget()
+  check(r and r.id == 4444 and r.n == ru, "1.0.28: ett namn på 40 kyrilliska tecken godtas")
+  S.shotLastTarget = nil
+  units.target = { guid = "Creature-0-1-2-3-4445-000000000D", name = string.rep("\208\148", 81), level = 10 }
+  local r81 = S.shotTarget()
+  check(r81 == nil or r81.id ~= 4445, "1.0.28: 81 tecken nekas")
+  units.target = nil
+end
+
 print(string.format("ForeverScout mock: %d ok, %d fel", passes, fails))
 if fails > 0 then error("ForeverScout mock: " .. fails .. " fel") end
