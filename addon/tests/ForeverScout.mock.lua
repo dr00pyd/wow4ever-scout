@@ -894,8 +894,68 @@ fire("PLAYER_LOGOUT")
 check(me.bags == "16,10:4245,8:4496,6:805,10:4245","1.0.19: PLAYER_LOGOUT läser väskorna")
 check(T.session.errors == 0, "1.0.19 utan fångade fel (" .. tostring(T.session.lastError) .. ")")
 
+-- 1.0.31: questloggen (chars[<id>].a) – bara id och tal, aldrig titlar eller måltexter
+do
+  local QL = C_QuestLog or {}
+  C_QuestLog = QL
+  local oldObj, oldOn, oldAfter = QL.GetQuestObjectives, QL.IsOnQuest, C_Timer.After
+  C_Timer.After = function(_, fn) fn() end
+  check(me.a == nil, "1.0.31: ingen logg innan spelet svarat")
+  -- rubrik, två uppdrag (ett klart att lämna in), ett misslyckat; måltexter med tal och ett utan
+  local log = {
+    { "Wetlands", nil, nil, true, false, nil, nil, nil },
+    { "Claws from the Deep", 21, nil, false, false, nil, nil, 279 },
+    { "Daily Delivery", 22, nil, false, false, 1, nil, 288 },
+    { "Escort", 25, nil, false, false, -1, nil, 464 },
+  }
+  local boards = { [2] = { { "Bluegill Murloc slain: 4/10", "monster", false }, { "Find the camp", "event", false } }, [3] = { { "Delivered: 1/1", "item", true } } }
+  GetNumQuestLogEntries = function() return #log end
+  GetQuestLogTitle = function(i) local r = log[i]; if r then return unpack(r, 1, 8) end end
+  GetNumQuestLeaderBoards = function(i) return boards[i] and #boards[i] or 0 end
+  GetQuestLogLeaderBoard = function(j, i) local b = boards[i] and boards[i][j]; if b then return b[1], b[2], b[3] end end
+  QL.GetQuestObjectives = function() return nil end
+  QL.IsOnQuest = nil
+  clock = clock + 10
+  local sa = db.seq
+  fire("QUEST_LOG_UPDATE")
+  check(me.a == "279:4/10;0/1,288=c:1/1,464=f", "1.0.31: loggen i id-ordning med mål, =c klar, =f misslyckad (" .. tostring(me.a) .. ")")
+  check(me.aAt == time() and db.seq > sa, "1.0.31: aAt och seq ändras med loggen")
+  local at1 = me.aAt
+  sa = db.seq
+  fire("QUEST_LOG_UPDATE")
+  check(me.aAt == at1 and db.seq == sa, "1.0.31: oförändrad logg ändrar varken aAt eller seq")
+  -- framsteg i samma sekund: aAt ökar ändå (servern kräver nyare)
+  boards[2][1][1] = "Bluegill Murloc slain: 5/10"
+  fire("QUEST_LOG_UPDATE")
+  check(me.a == "279:5/10;0/1,288=c:1/1,464=f" and me.aAt == at1 + 1, "1.0.31: aAt ökar strikt")
+  -- hopfälld rubrik: dolda uppdrag behålls så länge spelet inte säger nej
+  log = { { "Wetlands", nil, nil, true, true, nil, nil, nil } }
+  fire("QUEST_LOG_UPDATE")
+  check(me.a == "279:5/10;0/1,288=c:1/1,464=f", "1.0.31: en hopfälld rubrik raderar inget")
+  QL.IsOnQuest = function(id) return id ~= 464 end
+  fire("QUEST_LOG_UPDATE")
+  check(me.a == "279:5/10;0/1,288=c:1/1", "1.0.31: ett avbrutet uppdrag försvinner när spelet säger nej")
+  -- tom logg (allt inlämnat)
+  log = {}
+  fire("QUEST_LOG_UPDATE")
+  check(me.a == "", "1.0.31: tom logg sparas som tom sträng")
+  -- C_QuestLog.GetQuestObjectives går före leaderboard-API:t
+  log = { { "Wetlands", nil, nil, true, false, nil, nil, nil }, { "x", 21, nil, false, false, nil, nil, 279 } }
+  QL.GetQuestObjectives = function(id) if id == 279 then return { { numFulfilled = 7, numRequired = 10, finished = false, text = "x" } } end end
+  fire("QUEST_LOG_UPDATE")
+  check(me.a == "279:7/10", "1.0.31: målen ur C_QuestLog.GetQuestObjectives")
+  -- utloggning läser loggen
+  log[2][8] = 288
+  boards = {}
+  QL.GetQuestObjectives = function() return nil end
+  fire("PLAYER_LOGOUT")
+  check(me.a == "288", "1.0.31: PLAYER_LOGOUT läser loggen")
+  check(T.session.errors == 0, "1.0.31 utan fångade fel (" .. tostring(T.session.lastError) .. ")")
+  QL.GetQuestObjectives, QL.IsOnQuest, C_Timer.After = oldObj, oldOn, oldAfter
+end
+
 -- Inga namn och bara kontraktets fält
-local allowed = { lvl = true, cls = true, at = true, q = true, qAt = true, prof = true, bags = true, bAt = true }
+local allowed = { lvl = true, cls = true, at = true, q = true, qAt = true, prof = true, bags = true, bAt = true, a = true, aAt = true }
 local onlyContract = true
 for k, c in pairs(db.chars) do
   if type(k) ~= "string" or not k:match("^%d+$") then onlyContract = false end
@@ -935,7 +995,7 @@ do
   end
   check(line and line:find("quests=") and line:find("professions=3", 1, true), "1.0.11: /scout test sammanfattar chars")
   check(not leak, "1.0.11: /scout test skriver aldrig namn eller id")
-  check(line and line:find("bags=16,10,8,6,10)", 1, true) and not line:find("4245", 1, true), "1.0.19: /scout test visar väskornas storlek, inte föremåls-id:n")
+  check(line and line:find("bags=16,10,8,6,10 active=", 1, true) and not line:find("4245", 1, true), "1.0.19: /scout test visar väskornas storlek, inte föremåls-id:n")
 end
 
 -- Tak: högst 50 karaktärer, den som uppdaterades för längst sedan försvinner

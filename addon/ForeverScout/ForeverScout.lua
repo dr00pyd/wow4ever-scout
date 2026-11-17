@@ -14,7 +14,7 @@
 local ADDON, ns = ...
 ns = ns or {}
 
-local VERSION = "1.0.30"
+local VERSION = "1.0.32"
 local FORMAT = 1
 local MAX_SPOTS = 50          -- per NPC / object, oldest dropped
 local MAX_LOOT = 2000         -- loot entries, oldest dropped
@@ -2058,6 +2058,7 @@ local function charAfterCombat()
   if session.questsAfterCombat then session.questsAfterCombat = false; refreshQuests() end
   if session.profAfterCombat then session.profAfterCombat = false; scanProfessions() end
   if session.bagsAfterCombat then session.bagsAfterCombat = false; session.refreshBags() end
+  if session.logAfterCombat then session.logAfterCombat = false; session.refreshLog() end
 end
 
 local function charLevelUp()
@@ -2112,6 +2113,106 @@ function session.queueBags(delay)
     session.bagsPending = false
     if fighting() then session.bagsAfterCombat = true; return end
     session.refreshBags()
+  end)
+end
+
+-- 1.0.31: this character's quest log (chars[<id>].a), so the site can show "in progress 4/10" beside "done" and
+-- "not started". a = "33:4/10;2/5,783=c,5545=f": one entry per quest in the log, ascending id,
+-- "<quest id>[=c|=f][:<have>/<need>[;...]]", c = ready to turn in, f = failed, objectives in log order (an objective
+-- without numbers is 0/1 or 1/1). aAt = time() when it last changed, always above the previous aAt. Only ids and
+-- numbers - never a title or objective text. An abandoned quest is just missing from the next snapshot. Nothing is
+-- read before the session's first QUEST_LOG_UPDATE (an empty log at login may not be loaded yet). Collapsed headers
+-- hide their quests: a stored quest that is not visible stays while C_QuestLog.IsOnQuest says yes or cannot answer.
+-- Everything lives in `session` (the main chunk is at Lua's limit of 200 locals).
+session.LOG_MAX, session.LOG_OBJS = 35, 10
+
+-- "have/need" from the numbers, else from "Kobold Vermin slain: 4/10", else 0/1 or 1/1 from finished.
+function session.logPair(have, need, finished, text)
+  if not (have and need) and text then
+    local h, n = text:match("(%d+)%s*/%s*(%d+)")
+    have, need = tonumber(h), tonumber(n)
+  end
+  if have and need and need > 0 and need <= 999999 and have >= 0 and have == floor(have) and need == floor(need) then
+    return string.format("%d/%d", math.min(have, need), need)
+  end
+  return finished and "1/1" or "0/1"
+end
+
+-- One quest's objectives as "n/m;n/m", or nil without objectives.
+function session.logObjectives(id, idx)
+  local parts = {}
+  local objs = C_QuestLog and try(C_QuestLog.GetQuestObjectives, id)
+  if type(objs) == "table" and #objs > 0 then
+    for _, o in ipairs(objs) do
+      if #parts >= session.LOG_OBJS then break end
+      if type(o) == "table" then
+        parts[#parts + 1] = session.logPair(num(o.numFulfilled), num(o.numRequired), clean(o.finished), str(o.text))
+      end
+    end
+  elseif idx then
+    for i = 1, math.min(num(try(GetNumQuestLeaderBoards, idx)) or 0, session.LOG_OBJS) do
+      local text, _, finished = try(GetQuestLogLeaderBoard, i, idx)
+      parts[#parts + 1] = session.logPair(nil, nil, clean(finished), str(text))
+    end
+  end
+  return #parts > 0 and table.concat(parts, ";") or nil
+end
+
+-- The log as the stored string, or nil when the game does not answer (nothing is guessed).
+function session.readLog(c)
+  local QL = C_QuestLog or {}
+  local n = num(try(GetNumQuestLogEntries)) or num(try(QL.GetNumQuestLogEntries))
+  if not n or (n == 0 and not session.logReady) then return nil end
+  local seen, ids, collapsed = {}, {}, false
+  for i = 1, math.min(n, 100) do
+    local _, _, _, h, col, complete, _, qid = try(GetQuestLogTitle, i)
+    local info = qid == nil and try(QL.GetInfo, i) or nil
+    if type(info) == "table" then h, col, qid = info.isHeader, info.isCollapsed, info.questID end
+    local id = num(qid)
+    if clean(h) then
+      if clean(col) then collapsed = true end
+    elseif id and id > 0 and id == floor(id) and not seen[id] and #ids < session.LOG_MAX then
+      complete = num(complete)
+      if complete == nil then
+        complete = clean(try(QL.IsFailed, id)) and -1 or (clean(try(QL.IsComplete, id)) and 1 or 0)
+      end
+      local o = session.logObjectives(id, i)
+      seen[id] = string.format("%.0f", id) .. (complete == 1 and "=c" or complete == -1 and "=f" or "") .. (o and (":" .. o) or "")
+      ids[#ids + 1] = id
+    end
+  end
+  -- A collapsed header hides quests: keep stored ones the game still says we are on (or cannot say).
+  if collapsed and type(c.a) == "string" then
+    for part in c.a:gmatch("[^,]+") do
+      local id = tonumber(part:match("^(%d+)"))
+      if id and not seen[id] and #ids < session.LOG_MAX and clean(try(QL.IsOnQuest, id)) ~= false then
+        seen[id] = part; ids[#ids + 1] = id
+      end
+    end
+  end
+  table.sort(ids)
+  local out = {}
+  for i, id in ipairs(ids) do out[i] = seen[id] end
+  return table.concat(out, ",")
+end
+
+function session.refreshLog()
+  local c = charEntry()
+  if not c then return end
+  local s = session.readLog(c)
+  if not s then return end
+  local changed = charBasics(c)
+  if s ~= c.a then c.a = s; c.aAt = math.max(now(), (tonumber(c.aAt) or 0) + 1); changed = true end
+  if changed then charChanged(c) end
+end
+
+function session.queueLog(delay)
+  if session.logPending then return end
+  session.logPending = true
+  after(delay or 2, function()
+    session.logPending = false
+    if fighting() then session.logAfterCombat = true; return end
+    session.refreshLog()
   end)
 end
 
@@ -2220,11 +2321,18 @@ local function diagnose()
   say("chars: " .. nChars .. " (this character: "
     .. (type(c) == "table" and ("quests=" .. nq .. " professions=" .. np
       -- 1.0.19: bag sizes only (backpack first), never the bags' item ids
-      .. " bags=" .. (type(c.bags) == "string" and (c.bags:gsub(":%d+", "")) or "none")) or (key and "none yet" or "id unreadable")) .. ")")
+      .. " bags=" .. (type(c.bags) == "string" and (c.bags:gsub(":%d+", "")) or "none")
+      -- 1.0.31: number of quests in the stored quest log
+      .. " active=" .. (type(c.a) == "string" and tostring(c.a == "" and 0 or select(2, c.a:gsub(",", "")) + 1) or "none"))
+      or (key and "none yet" or "id unreadable")) .. ")")
   local function has(f) return type(f) == "function" and "y" or "n" end
   local QL, TS = C_QuestLog or {}, C_TradeSkillUI or {}
   say("api: C_Container.GetContainerNumSlots=" .. has((C_Container or {}).GetContainerNumSlots) .. " GetContainerNumSlots=" .. has(GetContainerNumSlots)
     .. " GetInventoryItemID=" .. has(GetInventoryItemID))
+  -- 1.0.31: the quest log snapshot (chars[<id>].a). 1.0.32: worded without "api: X=" (a secret scanner read the long
+  -- line as a key); each function is "y" or "n" as above.
+  say("quest log: entries " .. has(GetNumQuestLogEntries) .. ", title " .. has(GetQuestLogTitle) .. ", info " .. has(QL.GetInfo)
+    .. ", objectives " .. has(QL.GetQuestObjectives) .. ", on quest " .. has(QL.IsOnQuest))
   say("api: GetQuestsCompleted=" .. has(GetQuestsCompleted) .. " GetAllCompletedQuestIDs=" .. has(QL.GetAllCompletedQuestIDs)
     .. " GetTradeSkillLine=" .. has(GetTradeSkillLine) .. " GetTradeSkillRecipeLink=" .. has(GetTradeSkillRecipeLink)
     .. " C_TradeSkillUI.GetAllRecipeIDs=" .. has(TS.GetAllRecipeIDs) .. " GetBaseProfessionInfo=" .. has(TS.GetBaseProfessionInfo)
@@ -2908,7 +3016,7 @@ local function onSlash(msg)
     for _, line in ipairs(L.help) do say(line) end
   elseif cmd == "char" then
     if arg == "on" then
-      opt.char = true; opt.progressOff = nil; updateChar(); refreshQuests(); say(L.char_on)
+      opt.char = true; opt.progressOff = nil; updateChar(); refreshQuests(); session.refreshLog(); say(L.char_on)
     elseif arg == "off" then
       opt.char = false; db.char = nil; session.recipes = nil
       -- 1.0.11: även den här karaktärens avklarade quests och recept (chars) – och de samlas inte in igen
@@ -2980,7 +3088,8 @@ local handlers = {
   QUEST_GREETING = function() noteUnit("npc", { quest = true }) end,
   QUEST_DETAIL = onQuestDetail,
   QUEST_ACCEPTED = onQuestAccepted,
-  QUEST_LOG_UPDATE = queueObjectiveRefresh,
+  QUEST_LOG_UPDATE = function() queueObjectiveRefresh(); session.logReady = true; session.queueLog() end,
+  QUEST_REMOVED = function() session.queueLog() end,
   ITEM_DATA_LOAD_RESULT = queueObjectiveRefresh,
   QUEST_PROGRESS = function() onQuestEnd(false) end,
   QUEST_COMPLETE = function() onQuestEnd(true) end,
@@ -3040,7 +3149,7 @@ local handlers = {
   end,
   PLAYER_LEVEL_UP = function() after(1, updateChar); charLevelUp() end,
   SKILL_LINES_CHANGED = function() after(1, updateChar) end,
-  PLAYER_LOGOUT = function() updateChar(); refreshQuests(); session.refreshBags() end,
+  PLAYER_LOGOUT = function() updateChar(); refreshQuests(); session.refreshBags(); session.refreshLog() end,
   -- 1.0.20: svaret på /scout bild – gränssnittet visas igen och bilden antecknas (bara om addonen själv tog den)
   SCREENSHOT_SUCCEEDED = function() session.shotEvent(true) end,
   SCREENSHOT_FAILED = function() session.shotEvent(false) end,

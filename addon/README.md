@@ -37,6 +37,17 @@ Mappen innehåller två TOC-filer. Forever läser `ForeverScout_Forever.toc` och
 
 Addonen skriver inget i chatten om du inte själv skriver ett kommando – utom vid inloggning och `/reload`: en rad om att den är igång och (från 1.0.26) en rad med kvittot på den senaste uppladdningen. Den skriver aldrig i andras chatt utom med `/scout tipsa`. Fel fångas och visas aldrig som felrutor.
 
+## 1.0.32 i korthet
+
+- Samma som 1.0.31, men raden om questloggens funktioner i `/scout test` är omskriven (`quest log: entries y, …`).
+
+## 1.0.31 i korthet
+
+- **Questloggen** (`chars[<id>].a`): vilka uppdrag din karaktär har i loggen just nu och hur långt målen har kommit,
+  så att guiden kan visa "◐ 4/10" och "Klar att lämna in" bredvid "✓ Gjord" på /uppdrag, kartorna, NPC-sidorna och
+  levelingtavlan – bara för dig när du är inloggad. Bara uppdrags-id och tal, aldrig titlar eller måltexter.
+- `/scout test` visar `active=<antal>` och vilka questlogg-API:er spelet har.
+
 ## 1.0.30 i korthet
 
 - `/scout tips` speglas i kontots fil (`ForeverScoutDB.tipsOff = true` när tipsen är avstängda, annars inget fält).
@@ -107,6 +118,8 @@ ForeverScoutDB.chars = {
     },
     bags = "16,8:4496,8:4496,6:805,0", -- 1.0.19: väskorna i ordning (ryggsäcken, bag 1–4): platser[:väskans föremåls-id], 0 = tom plats
     bAt = 1794503193,             -- 1.0.19: time() när väskornas storlek senast ändrades
+    a = "33:4/10;2/5,783=c,5545=f", -- 1.0.31: questloggen, id stigande, "<id>[=c|=f][:<har>/<behöver>[;…]]" ("" = tom logg), högst 35 uppdrag och 10 mål
+    aAt = 1794503193,             -- 1.0.31: time() när loggen senast ändrades (ökar alltid)
   },
 }
 ```
@@ -115,6 +128,7 @@ ForeverScoutDB.chars = {
 - **Recept** läses när yrkesfönstret öppnas eller ändras (`TRADE_SKILL_SHOW`/`TRADE_SKILL_UPDATE`/`TRADE_SKILL_LIST_UPDATE`, för Classic-crafts som Enchanting `CRAFT_SHOW`/`CRAFT_UPDATE`), 0,5 s efter händelsen. Classic: `GetTradeSkillLine()` + `GetTradeSkillInfo(i)` (rubriker hoppas över) + spell-id ur `GetTradeSkillRecipeLink(i)` (`enchant:`/`spell:`), crafts via `GetCraftDisplaySkillLine()` och `GetCraftRecipeLink(i)`/`GetCraftItemLink(i)`. Mainline: `C_TradeSkillUI.GetBaseProfessionInfo()`/`GetChildProfessionInfo()` + `GetAllRecipeIDs()` där `GetRecipeInfo(id).learned` (recept-id = spell-id). En rad som bara har en föremålslänk hoppas över – inget gissas. Någon annans länkade yrke, ett gilleyrke och NPC-tillverkning sparas aldrig. Crafts utan skill line (Beast Training) hoppas över.
 - **Filter:** när fönstret är filtrerat (sökruta, "har material", underklass/plats-filter eller en ihopfälld rubrik) läggs nya recept bara till; listan krymper aldrig. En ofiltrerad lista ersätter den sparade bara om den inte är kortare – eller om ranken har sjunkit (yrket har lärts om).
 - **Väskor** (1.0.19) läses med `C_Container.GetContainerNumSlots(0–4)` (annars `GetContainerNumSlots`) och väskans föremåls-id med `GetInventoryItemID("player", ContainerIDToInventoryID(i))`: 2 s efter `BAG_UPDATE`/`BAG_CONTAINER_UPDATE`/`PLAYERBANKSLOTS_CHANGED` (många händelser i rad ger en läsning), 5 s efter `PLAYER_ENTERING_WORLD` och vid `PLAYER_LOGOUT`. Bara antal platser och vilket föremål väskan är – aldrig innehållet och aldrig banken. En storlek som spelet döljer (secret value) eller en ryggsäck med 0 platser (inte laddad än) ändrar ingenting. Webbplatsen visar dem bara för dig på Marknadens väsksida ("din minsta väska har 6 platser – en 12-platsväska kostar …").
+- **Questloggen** (1.0.31) läses med `GetNumQuestLogEntries()`/`GetQuestLogTitle(i)` (rubriker hoppas över; `=c` = klar att lämna in, `=f` = misslyckad) och målen med `C_QuestLog.GetQuestObjectives(id)`, annars `GetQuestLogLeaderBoard(j, i)` (talen ur texten, ett mål utan tal blir 0/1 eller 1/1): 2 s efter `QUEST_LOG_UPDATE`/`QUEST_REMOVED` och vid `PLAYER_LOGOUT`. Ingenting läses före sessionens första `QUEST_LOG_UPDATE` (en tom logg vid inloggning kan vara oladdad). En hopfälld rubrik döljer sina uppdrag: ett sparat uppdrag behålls så länge `C_QuestLog.IsOnQuest` inte säger nej. Ett avbrutet uppdrag saknas i nästa läsning.
 - **Kostnad:** ingenting i strid (arbetet skjuts upp till `PLAYER_REGEN_ENABLED`), debounce på alla händelser, och `seq` ökar bara när posten faktiskt ändras – en oförändrad fil laddas inte upp igen. Högst 50 karaktärer; den som ändrades för längst sedan tas bort. `/scout reset` tömmer även `chars`.
 
 **Valfritt (`/scout char on`):** klass, ras, nivå, yrken med färdighetsnivå och inlärda recept (spell-id). Det är avstängt som standard, och du väljer per karaktär.
