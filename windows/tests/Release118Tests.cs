@@ -407,14 +407,20 @@ public sealed class Release118Tests : IDisposable
         Assert.Null(AddonReceipt.Parse(def));
         Assert.All(def.Split('\n'), line => Assert.True(line.Length == 0 || line.TrimEnd('\r').StartsWith("--", StringComparison.Ordinal), "bara kommentarer: " + line));
         Assert.DoesNotContain("--[", def, StringComparison.Ordinal);
+        // Kvittot finns från addon 1.0.26; versionen själv höjs vid varje addonsläpp, så testet låser den inte.
+        string? version = null;
         foreach (var toc in new[] { "ForeverScout.toc", "ForeverScout_Forever.toc" })
         {
             var lines = File.ReadAllLines(Path.Combine(addon, toc)).Select(l => l.Trim()).ToList();
-            Assert.Contains("## Version: 1.0.26", lines);
+            var v = lines.FirstOrDefault(l => l.StartsWith("## Version: ", StringComparison.Ordinal))?["## Version: ".Length..];
+            Assert.NotNull(v);
+            Assert.True(Version.Parse(v!) >= new Version(1, 0, 26), toc + ": version " + v + " ska vara minst 1.0.26");
+            Assert.True(version is null || version == v, "båda .toc-filerna ska ha samma version");
+            version = v;
             int r = lines.IndexOf("Receipt.lua"), m = lines.IndexOf("ForeverScout.lua");
             Assert.True(r >= 0 && m > r, toc + ": Receipt.lua ska stå före ForeverScout.lua");
         }
-        Assert.Contains("local VERSION = \"1.0.26\"", File.ReadAllText(Path.Combine(addon, "ForeverScout.lua")));
+        Assert.Contains("local VERSION = \"" + version + "\"", File.ReadAllText(Path.Combine(addon, "ForeverScout.lua")));
     }
 
     private static string AddonSourceDir()
