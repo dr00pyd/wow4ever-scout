@@ -33,6 +33,13 @@ internal sealed class MainWindow : Window
     private readonly StackPanel _journal = new() { Spacing = 6 };
     /// <summary>"Addonen har inte sparat något än" – syns bara tills spelet sparat ForeverScout.lua första gången.</summary>
     private readonly Border _help;
+    /// <summary>1.0.18: beskedet överst (påminnelsen om /reload, varningen när spelet sparar utan addonen) – dolt när inget gäller.</summary>
+    private readonly Border _notice;
+    private readonly TextBlock _noticeTitle = Look.Label("", 15, Look.GoldHi, FontWeight.Bold);
+    private readonly TextBlock _noticeBody = Look.Label("", 13, Look.Text);
+    // 1.0.18: spelarens Scout-bilder (rad under översiktskorten) och poäng som väntar på bekräftelse (Mitt bidrag)
+    private readonly TextBlock _pics = Look.Label("", 13, Look.Muted);
+    private readonly TextBlock _pending = Look.Label("", 13, Look.GoldHi);
     private readonly TextBlock _footAddon = Look.Label("", 12);
     private readonly TextBlock _footUpload = Look.Label("", 12);
     private readonly TextBlock _footNext = Look.Label("", 12, Look.Muted);
@@ -80,6 +87,19 @@ internal sealed class MainWindow : Window
         AddCol(stats, StatCard(T("dash.stat.collected"), _statCollected), 0);
         AddCol(stats, StatCard(T("dash.stat.last"), _statLast), 1);
         AddCol(stats, StatCard(T("dash.stat.points"), _statPoints), 2);
+        // 1.0.18: en rad under korten – spelarens Scout-bilder och länken Mina bilder
+        var picsLink = new Button
+        {
+            Content = T("pics.mine") + " ›", Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(0),
+            Foreground = Look.B(Look.Gold), FontWeight = FontWeight.Bold, FontSize = 13, Cursor = new Cursor(StandardCursorType.Hand),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        picsLink.Click += (_, _) => Links.Open(_app.Api, Links.Pictures(_app.Api));
+        _pics.VerticalAlignment = VerticalAlignment.Center;
+        var picsRow = new WrapPanel { Margin = new Thickness(2, -6, 0, 0) };
+        _pics.Margin = new Thickness(0, 0, 10, 0);
+        picsRow.Children.Add(_pics);
+        picsRow.Children.Add(picsLink);
 
         // ---- tabell
         BuildTable();
@@ -98,6 +118,8 @@ internal sealed class MainWindow : Window
         AddCol(mineStats, Mini(T("mine.accepted"), _accepted), 3);
         mine.Children.Add(mineStats);
         mine.Children.Add(_mineDetail);
+        _pending.IsVisible = false;
+        mine.Children.Add(_pending); // 1.0.18: "+40 poäng väntar på att en spelare till bekräftar" – direkt ovanför förklaringen nedan
         mine.Children.Add(Look.Label(T("mine.hint"), 12, Look.Faint));
         var journal = new StackPanel { Spacing = 8 };
         journal.Children.Add(Look.Label(T("journal.title"), 17, Look.Text, FontWeight.Bold));
@@ -113,9 +135,18 @@ internal sealed class MainWindow : Window
         _help.BorderBrush = Look.B(Look.Gold);
         _help.IsVisible = false;
 
+        var notice = new StackPanel { Spacing = 6 };
+        notice.Children.Add(_noticeTitle);
+        notice.Children.Add(_noticeBody);
+        _notice = Look.Panel(notice, Color.Parse("#2E2619"));
+        _notice.BorderBrush = Look.B(Look.Gold);
+        _notice.IsVisible = false;
+
         var body = new StackPanel { Spacing = 16, Margin = new Thickness(24, 20) };
+        body.Children.Add(_notice);
         body.Children.Add(_help);
         body.Children.Add(stats);
+        body.Children.Add(picsRow);
         body.Children.Add(Look.Panel(tableBox));
         body.Children.Add(lower);
 
@@ -143,6 +174,7 @@ internal sealed class MainWindow : Window
         ShowContribution();
         ShowJournal();
         ShowStatus();
+        ShowNotice();
     }
 
     private static void AddCol(Grid g, Control c, int col) { Grid.SetColumn(c, col); g.Children.Add(c); }
@@ -278,6 +310,11 @@ internal sealed class MainWindow : Window
         _rank.Text = st.Rank is int r ? "#" + r.ToString("N0", Strings.Culture) : "–";
         _confirmed.Text = st.ConfirmedTotal is int cc ? cc.ToString("N0", Strings.Culture) : "–"; // bara från servern
         _accepted.Text = st.AcceptedTotal is int a ? a.ToString("N0", Strings.Culture) : "–";
+        // 1.0.18: bilderna (serverns siffror, annars det appen själv har skickat) och poängen som väntar på bekräftelse
+        _pics.Text = Overview.PicturesLine(st);
+        var pending = Overview.PendingLine(st);
+        _pending.Text = pending ?? "";
+        _pending.IsVisible = pending != null;
 
         _mineDetail.Children.Clear();
         if (st.LastConfirmed.Count == 0)
@@ -301,6 +338,18 @@ internal sealed class MainWindow : Window
                 _mineDetail.Children.Add(link);
             }
         }
+    }
+
+    /// <summary>1.0.18: visar eller döljer beskedet överst (<see cref="ScoutController.Notice"/>).</summary>
+    public void ShowNotice()
+    {
+        var n = _app.Notice;
+        _notice.IsVisible = n != null;
+        if (n is null) return;
+        _noticeTitle.Text = n.Title;
+        _noticeBody.Text = n.Body ?? "";
+        _noticeBody.IsVisible = !string.IsNullOrEmpty(n.Body);
+        _notice.BorderBrush = Look.B(n.Warning ? Look.Warn : Look.Gold);
     }
 
     public void ShowJournal()

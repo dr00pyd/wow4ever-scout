@@ -62,6 +62,12 @@ public sealed class MeResult
     [JsonPropertyName("confirmed")] public int? Confirmed { get; set; }
     [JsonPropertyName("uploads")] public int? Uploads { get; set; }
     [JsonPropertyName("lastUpload")] public long? LastUpload { get; set; }
+    /// <summary>1.0.18 (valfria): poäng och fynd som väntar på att en spelare till bekräftar. Lästa som JsonElement så
+    /// att ett oväntat värde aldrig gör hela svaret oläsbart (<see cref="Overview.Int"/>).</summary>
+    [JsonPropertyName("pendingPoints")] public JsonElement? PendingPoints { get; set; }
+    [JsonPropertyName("pendingFinds")] public JsonElement? PendingFinds { get; set; }
+    /// <summary>1.0.18 (valfritt): <c>{ published, pending, rejected }</c> – spelarens Scout-bilder.</summary>
+    [JsonPropertyName("media")] public JsonElement? Media { get; set; }
 
     /// <summary>Summan av "counts" för datatyperna (poster som servern godtagit, inte samma sak som bekräftade).</summary>
     public int? AcceptedTotal()
@@ -128,10 +134,12 @@ public sealed class DeviceStatusResult
 public sealed class ApiClient : IDisposable
 {
     public const string DefaultBaseUrl = "https://guide.wow4ever.se";
-    public const long MaxUploadBytes = 5 * 1024 * 1024;
-    public const long MaxHotfixBytes = 30 * 1024 * 1024;
+    // 1.0.18: klientens egna tak är bara ett skydd mot orimliga filer. Den verkliga gränsen sätter servern (413
+    // "too-large"), så att den kan höjas utan nytt klientsläpp – förut vägrade klienten själv vid serverns 5 MB.
+    public const long MaxUploadBytes = 32 * 1024 * 1024;
+    public const long MaxHotfixBytes = 64 * 1024 * 1024;
     /// <summary>1.0.14: creaturecache.wdb (servern tar emot högst lika mycket, lib/scout/wdb.ts WDB_MAX_BYTES).</summary>
-    public const long MaxCreatureCacheBytes = 8 * 1024 * 1024;
+    public const long MaxCreatureCacheBytes = 32 * 1024 * 1024;
     /// <summary>1.0.15: en förminskad bild (servern tar emot högst 1,5 MB).</summary>
     public const long MaxShotBytes = 1_500_000;
 

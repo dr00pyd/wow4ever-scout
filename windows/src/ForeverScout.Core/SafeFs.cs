@@ -378,6 +378,76 @@ public static class SafeFs
         return ts.All(char.IsAsciiDigit);
     }
 
+    // ------------------------------------------------------------------ Linux: AppImage-filen (självuppdatering, 1.0.18)
+
+    /// <summary>Bara för tester: låtsas att appen körs från den här AppImage-filen (då gäller reglerna på alla system).</summary>
+    internal static string? OwnAppImageOverride { get; set; }
+
+    /// <summary>
+    /// Linux: AppImage-filen som appen körs från ($APPIMAGE, satt av AppImage-startaren, med symlänkar upplösta), eller
+    /// null när appen inte körs som AppImage (uppackad tar.gz, utvecklingskörning). Bara sökvägen läses här.
+    /// </summary>
+    public static string? OwnAppImage
+    {
+        get
+        {
+            try
+            {
+                if (OwnAppImageOverride is { } o) return Normalize(o);
+                if (!Linux) return null;
+                return TrustedAppImageEnv() is { } image ? NormalizeUnix(image) : null;
+            }
+            catch (SafeFsException) { return null; }
+        }
+    }
+
+    /// <summary>Bara för tester: låtsas att processen körs från den här filen (jämförs mot $APPDIR).</summary>
+    internal static string? ProcessPathOverride { get; set; }
+
+    /// <summary>
+    /// $APPIMAGE – men bara när den här processen verkligen kör ur avbilden: binären ska ligga under $APPDIR
+    /// (monteringspunkten som AppImage-startaren sätter samtidigt). Miljövariabler ärvs: startas appen (uppackad
+    /// tar.gz) av ett ANNAT program som är en AppImage pekar $APPIMAGE på det programmets fil, och då fick
+    /// uppdateringen aldrig röra den (granskningen 2026-11-16). Bara miljön och sökvägar läses.
+    /// </summary>
+    internal static string? TrustedAppImageEnv()
+    {
+        var image = Environment.GetEnvironmentVariable("APPIMAGE");
+        var appDir = Environment.GetEnvironmentVariable("APPDIR");
+        var exe = ProcessPathOverride ?? Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(image) || !image.StartsWith('/')) return null;
+        if (string.IsNullOrWhiteSpace(appDir) || !appDir.StartsWith('/') || string.IsNullOrEmpty(exe)) return null;
+        return exe.StartsWith(appDir.TrimEnd('/') + "/", StringComparison.Ordinal) ? image : null;
+    }
+
+    /// <summary>Filerna Linux-uppdateringen får röra: AppImage-filen, &lt;fil&gt;.new och dess .tmp under skrivning. Inget annat i mappen.</summary>
+    private static bool IsOwnAppImageFile(string full) =>
+        OwnAppImage is { } image && (Eq(full, image) || Eq(full, image + ".new") || Eq(full, image + ".new.tmp"));
+
+    /// <summary>
+    /// Linux: byter AppImage-filen mot den nedladdade (&lt;fil&gt;.new) med ett enda namnbyte – rename(2) ersätter målet
+    /// atomärt, och den körande appen fortsätter från den gamla filen tills den avslutas. Bara de två filerna godtas.
+    /// </summary>
+    public static void ReplaceOwnAppImage()
+    {
+        var image = OwnAppImage ?? throw new SafeFsException("no-appimage", "");
+        var (from, _) = CheckScoped(image + ".new", Access.Write, isDir: false);
+        var (to, _) = CheckScoped(image, Access.Write, isDir: false);
+        if (!IsOwnAppImageFile(from) || !IsOwnAppImageFile(to)) throw new SafeFsException("not-appimage", to);
+        BeforeOpen?.Invoke(from);
+        File.Move(from, to, overwrite: true);
+    }
+
+    /// <summary>Linux: den nya AppImage-filen får samma rättigheter som den gamla, och alltid körbar för ägaren.</summary>
+    public static void CopyOwnAppImageMode()
+    {
+        if (!Unix) return;
+        var image = OwnAppImage ?? throw new SafeFsException("no-appimage", "");
+        var staged = Check(image + ".new", Access.Write, isDir: false);
+        var mode = File.Exists(image) ? File.GetUnixFileMode(image) : UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        File.SetUnixFileMode(staged, mode | UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+
     /// <summary>Självuppdateringens filer som finns bredvid exe:n (.new.exe, .new.exe.tmp, .old.exe, .old-*.exe).</summary>
     public static List<string> OwnExeLeftovers()
     {
@@ -420,6 +490,7 @@ public static class SafeFs
         }
         if (allowed is null && Unix && MacRule(full, isDir) is ({ } ma, { } ms)) { allowed = ma; scopeRoot = ms; }
         if (allowed is null && !isDir && IsOwnExeFile(full)) { allowed = Access.Write; scopeRoot = full; }
+        if (allowed is null && !isDir && IsOwnAppImageFile(full)) { allowed = Access.Write; scopeRoot = full; }
         if (allowed is null || allowed < want) throw new SafeFsException(allowed is null ? "outside" : "access", full);
         RefuseReparsePoints(full, scopeRoot!);
         return (full, scopeRoot!);
@@ -570,6 +641,27 @@ public static class SafeFs
         {
             var fi = new FileInfo(p);
             return fi.Exists ? (fi.Length, fi.LastWriteTimeUtc) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>
+    /// 1.0.18: en katalogs ändringstid (null om den saknas) – bara där katalogen får listas. Inget i katalogen öppnas
+    /// och inga filnamn läses. Används för att se att spelet har sparat (WTF\Account\&lt;konto&gt;\SavedVariables).
+    /// </summary>
+    public static DateTime? DirectoryWriteTimeUtc(string path)
+    {
+        var p = Check(path, Access.Probe, isDir: true);
+        // Snävare än listning: bara <spelkatalog>\…\WTF\Account\<konto>\SavedVariables. Sökrötter, appdata och annat
+        // som får listas ger ingen ändringstid (på Linux släppte en sökrot igenom en godtycklig katalog, 2026-11-16).
+        bool saved;
+        lock (Lock)
+            saved = GameRoots.Any(g => Rel(p, g) is { Length: >= 4 } r && Eq(r[^1], "SavedVariables") && Eq(r[^3], "Account") && Eq(r[^4], "WTF"));
+        if (!saved) throw new SafeFsException("access", p);
+        try
+        {
+            var di = new DirectoryInfo(p);
+            return di.Exists ? di.LastWriteTimeUtc : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
     }
@@ -1064,8 +1156,7 @@ public static class SafeFs
         get
         {
             if (OwnExeOverride is { } o) return NormalizeUnix(o);
-            var image = Environment.GetEnvironmentVariable("APPIMAGE");
-            if (!string.IsNullOrWhiteSpace(image) && image.StartsWith('/'))
+            if (TrustedAppImageEnv() is { } image)
             {
                 try { return NormalizeUnix(image); } catch (SafeFsException) { }
             }

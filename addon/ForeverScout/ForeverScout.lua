@@ -14,7 +14,7 @@
 local ADDON, ns = ...
 ns = ns or {}
 
-local VERSION = "1.0.25"
+local VERSION = "1.0.27"
 local FORMAT = 1
 local MAX_SPOTS = 50          -- per NPC / object, oldest dropped
 local MAX_LOOT = 2000         -- loot entries, oldest dropped
@@ -2133,6 +2133,14 @@ local function initDb()
   opt = ForeverScoutOpt
   -- 1.0.20: bilder tagna med /scout bild (töms inte av /scout reset – bilderna finns redan på disken)
   if type(db.shots) ~= "table" then db.shots = {} end
+  -- 1.0.27: id:n på alla NPC:er spelaren har fotat (db.shots sparar bara de 100 senaste bilderna). Fylls från db.shots
+  -- första gången, så att bilder tagna med en äldre addon räknas.
+  if type(db.shotIds) ~= "string" then
+    db.shotIds = ""
+    for _, r in ipairs(db.shots) do
+      if type(r) == "table" and r.k == "npc" and type(r.id) == "number" then pcall(session.mineAdd, r.id) end
+    end
+  end
   pcall(session.shotNames)
 end
 
@@ -2210,6 +2218,37 @@ local function ago(L, secs)
   return string.format(L.day, floor(secs / 86400))
 end
 
+-- 1.0.26: the receipt the Forever Scout client writes after each upload (Receipt.lua, loaded before this file):
+--   ForeverScoutReceipt = { v = 1, t = <unix time>, finds = n, shots = n, pending = n, pendingFinds = n }
+-- Numbers only – the client writes nothing else, and anything else here is ignored. The addon can only read files
+-- the game loads at login and /reload, so the receipt is always the upload before this load.
+-- Returns the line ("Last upload 3 min ago: ...") and the receipt's time, or nil when there is no usable receipt
+-- (the empty default file, another format version, older than 30 days). A function in session (the locals limit).
+function session.receipt()
+  local r = ForeverScoutReceipt
+  if type(r) ~= "table" or r.v ~= 1 then return nil end
+  local function num(v)
+    if type(v) == "number" and v >= 0 and v < 1e12 and v == floor(v) then return v end
+    return nil
+  end
+  local t, finds, shots = num(r.t), num(r.finds), num(r.shots)
+  if not t or t == 0 or not finds or not shots then return nil end
+  local age = now() - t
+  if age > 30 * 86400 then return nil end
+  local L = T()
+  if type(L.receipt) ~= "string" then return nil end
+  local line = string.format(L.receipt, ago(L, age), finds, shots)
+  local p, pf = num(r.pending), num(r.pendingFinds)
+  if p and p > 0 then
+    if pf and pf > 0 and type(L.receipt_pending) == "string" then
+      line = line .. " " .. string.format(L.receipt_pending, p, pf)
+    elseif type(L.receipt_pending_pts) == "string" then
+      line = line .. " " .. string.format(L.receipt_pending_pts, p)
+    end
+  end
+  return line, t
+end
+
 local function showStatus()
   local L = T()
   local c = {
@@ -2219,6 +2258,8 @@ local function showStatus()
   local total = 0
   for _, v in ipairs(c) do total = total + v end
   say(string.format(L.status_head, VERSION, total, db.seq or 0))
+  local receipt = session.receipt()   -- 1.0.26: "Last upload ..." (the client's receipt), if there is one
+  if receipt then say(receipt) end
   if total == 0 then say(L.status_none); return end
   say(string.format(L.status_counts, c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10]))
   if session.lastKind then
@@ -2564,19 +2605,79 @@ end
     return session.shotHaveSet
   end
 
+  -- 1.0.27: NPC:er spelaren har fotat, som en sträng med id:n i db.shotIds ("12,34"), äldsta först, högst MAX_SHOT_IDS.
+  -- Följer med kontot (ForeverScoutDB), så en NPC som fotats med en karaktär får ingen rad på en annan.
+  local MAX_SHOT_IDS = 5000
+  local function mineSet()
+    local src = type(db) == "table" and db.shotIds or nil
+    if session.mineSrc ~= src or type(session.mineSet) ~= "table" then
+      local set, n = {}, 0
+      if type(src) == "string" then
+        for id in src:gmatch("%d+") do
+          local v = tonumber(id)
+          if v and not set[v] then set[v] = true; n = n + 1 end
+        end
+      end
+      session.mineSrc, session.mineSet, session.mineN = src, set, n
+    end
+    return session.mineSet
+  end
+  function session.mineAdd(id)
+    if type(db) ~= "table" or type(id) ~= "number" or id <= 0 or id % 1 ~= 0 then return end
+    if mineSet()[id] then return end
+    local s = type(db.shotIds) == "string" and db.shotIds or ""
+    s = (s == "") and tostring(id) or (s .. "," .. tostring(id))
+    local n = (session.mineN or 0) + 1
+    while n > MAX_SHOT_IDS do s = s:gsub("^%d*,?", "", 1); n = n - 1 end
+    db.shotIds = s
+  end
+
+  -- 1.0.27: listans ålder i dagar ur built ("YYYY-MM-DD"), nil om datumet saknas eller är ogiltigt. Räknas utan
+  -- time{...} (dagar sedan 1970-01-01, UTC), så att svaret inte beror på datorns tidszon.
+  local function listAgeDays(built)
+    local y, m, d = tostring(built or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    y, m, d = tonumber(y), tonumber(m), tonumber(d)
+    if not y or m < 1 or m > 12 or d < 1 or d > 31 then return nil end
+    if m <= 2 then y = y - 1 end
+    local era = floor(y / 400)
+    local yoe = y - era * 400
+    local mp = (m + 9) % 12
+    local doy = floor((153 * mp + 2) / 5) + d - 1
+    local doe = yoe * 365 + floor(yoe / 4) - floor(yoe / 100) + doy
+    local days = era * 146097 + doe - 719468
+    local t = now()
+    if t <= 0 then return nil end
+    return (t - days * 86400) / 86400
+  end
+  local OLD_LIST_DAYS = 7
+
   -- Raden för enheten, eller nil när ingen rad ska visas.
+  -- 1.0.27: utan lista (ShotList.lua laddades inte – en ny fil efter /reload, spelet läser nya filer först vid omstart)
+  -- visas ingen rad alls, och spelaren får en gång per session veta att spelet ska startas om. Förr fick då varje NPC
+  -- raden, och spelare fotade NPC:er som redan hade bild. Är listan äldre än OLD_LIST_DAYS är raden försiktigare.
   function session.shotTipText(unit)
     if type(db) ~= "table" or type(opt) ~= "table" or opt.tipsOff then return nil end
     if inCombat() then return nil end             -- okänt räknas som strid
     local rec = unitRec(unit)
     if not rec or rec.k ~= "npc" or type(rec.id) ~= "number" then return nil end
-    if shotHave()[rec.id] then return nil end
+    local list = ForeverScoutShotList
+    if type(list) ~= "table" or (type(list.ids) ~= "string" and type(list.ids) ~= "table") then
+      if not session.noListSaid then
+        session.noListSaid = true
+        pcall(say, T().shot_nolist or "the picture list did not load – restart the game")
+      end
+      return nil
+    end
+    if shotHave()[rec.id] or mineSet()[rec.id] then return nil end
     if type(db.shots) == "table" then
       for _, s in ipairs(db.shots) do
         if type(s) == "table" and s.k == "npc" and s.id == rec.id then return nil end
       end
     end
-    return str(T().shot_tip)
+    local L = T()
+    local age = listAgeDays(list.built)
+    if age and age > OLD_LIST_DAYS and L.shot_tip_old then return str(L.shot_tip_old) end
+    return str(L.shot_tip)
   end
 
   -- Lägger raden i spelets tooltip (bara GameTooltip). true om en rad lades till. Enheten: den tooltipen själv anger
@@ -2642,6 +2743,7 @@ end
     local list = db.shots
     list[#list + 1] = r
     while #list > MAX_SHOTS do table.remove(list, 1) end
+    if r.k == "npc" then pcall(session.mineAdd, r.id) end   -- 1.0.27: minns NPC:n även när bilden fallit ur db.shots
     nextSeq()                   -- så att klienten ser att filen har något nytt att ladda upp
     answer(string.format(L.shot_taken, r.n), p.to)
   end
@@ -2858,7 +2960,16 @@ local handlers = {
   -- 1.0.6: one line in chat after login and /reload, so that players can see that the addon is loaded.
   PLAYER_LOGIN = function()
     pcall(session.shotRestoreNames)   -- 1.0.21: namn som blev kvar avstängda efter en avbruten bild slås på igen
-    after(5, function() say(string.format(T().loaded or "%s", VERSION)) end)
+    after(5, function()
+      say(string.format(T().loaded or "%s", VERSION))
+      -- 1.0.26: the client's receipt for the latest upload – once per receipt and character (opt is per character
+      -- and never uploaded), so that a /reload does not repeat it. /scout always shows it.
+      local line, t = session.receipt()
+      if line and type(opt) == "table" and opt.rcpt ~= t then
+        opt.rcpt = t
+        say(line)
+      end
+    end)
   end,
 }
 

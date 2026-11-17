@@ -38,6 +38,18 @@ internal sealed class MainForm : Form
     private TableLayoutPanel _lower = null!;
     /// <summary>"Addonen har inte sparat något än" – syns bara tills spelet sparat ForeverScout.lua första gången.</summary>
     private RoundedPanel _help = null!;
+    /// <summary>1.0.18: beskedet överst (påminnelsen om /reload, varningen när spelet sparar utan addonen) – dolt när inget gäller.</summary>
+    private RoundedPanel _notice = null!;
+    private readonly Label _noticeTitle = new() { AutoSize = true, Font = Theme.Ui(10.5f, FontStyle.Bold), ForeColor = Theme.GoldHi, BackColor = Color.Transparent, Margin = Padding.Empty, MaximumSize = new Size(520, 0) };
+    private readonly Label _noticeBody = new() { AutoSize = true, MaximumSize = new Size(520, 0), Font = Theme.Ui(9.75f), ForeColor = Theme.Text, BackColor = Color.Transparent, Margin = new Padding(0, 6, 0, 0) };
+    // 1.0.18: spelarens Scout-bilder (rad under översiktskorten) och poäng som väntar på bekräftelse (Mitt bidrag)
+    private readonly Label _pics = new() { AutoSize = true, Font = Theme.Ui(9.5f), ForeColor = Theme.Muted, BackColor = Color.Transparent, Margin = new Padding(2, 0, 10, 0) };
+    private readonly LinkLabel _picsLink = new()
+    {
+        AutoSize = true, Font = Theme.Ui(9.5f, FontStyle.Bold), LinkColor = Theme.Gold, ActiveLinkColor = Theme.GoldHi, VisitedLinkColor = Theme.Gold,
+        LinkBehavior = LinkBehavior.HoverUnderline, BackColor = Color.Transparent, Margin = Padding.Empty,
+    };
+    private readonly Label _pending = new() { AutoSize = true, MaximumSize = new Size(460, 0), Font = Theme.Ui(9.5f), ForeColor = Theme.GoldHi, BackColor = Color.Transparent, Margin = new Padding(0, 8, 0, 0), Visible = false };
     private TableLayoutPanel _stats = null!;
     // sidfot
     private readonly Label _footAddon = FootLabel();
@@ -53,7 +65,7 @@ internal sealed class MainForm : Form
         ForeColor = Theme.Text;
         Font = Theme.Ui(10f);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(940, 800);
+        ClientSize = new Size(940, 852); // 1.0.18: 52 px högre – bildraden och raden om väntande poäng ryms utan rullist
         MinimumSize = new Size(620, 560);
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
@@ -71,6 +83,7 @@ internal sealed class MainForm : Form
         ShowContribution();
         ShowJournal();
         ShowStatus();
+        ShowNotice();
         Reflow();
     }
 
@@ -104,21 +117,34 @@ internal sealed class MainForm : Form
 
         // Innehåll (rullbart i små fönster)
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, BackColor = Theme.Bg, Padding = new Padding(22, 18, 22, 14), AutoScroll = true };
+        body.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 1.0.18: beskedet (dolt när inget gäller)
         body.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // hjälprutan (dold när data finns)
         body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        body.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // 1.0.18: bildraden
         body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         // Tabellen får exakt plats för rubrik + 7 rader; korten under tar resten (rullning i små fönster).
         body.RowStyles.Add(new RowStyle(SizeType.Absolute, LogicalToDeviceUnits(36 * 8 + 2 + 14)));
         body.RowStyles.Add(new RowStyle(SizeType.AutoSize)); // får bli högre än fönstret → rullning
 
-        _stats = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 14) };
+        _stats = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 8) };
         for (int i = 0; i < 3; i++) _stats.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33f));
         _stats.Controls.Add(StatCard(S("dash.stat.collected"), _statCollected), 0, 0);
         _stats.Controls.Add(StatCard(S("dash.stat.last"), _statLast), 1, 0);
         _stats.Controls.Add(StatCard(S("dash.stat.points"), _statPoints), 2, 0);
+        // 1.0.18: en rad under korten – spelarens Scout-bilder och länken Mina bilder. En egen rad i fönstret (inte i
+        // kortens tabell: en rad som spänner över procentkolumnerna gör tabellen bredare än fönstret).
+        var picsRow = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = false, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 10) };
+        _picsLink.Text = S("pics.mine") + " ›";
+        _picsLink.AccessibleName = S("pics.mine");
+        _picsLink.LinkClicked += (_, _) => Links.Open(_app.Api, Links.Pictures(_app.Api));
+        picsRow.Controls.Add(_pics);
+        picsRow.Controls.Add(_picsLink);
+        _notice = NoticeCard();
         _help = HelpCard();
-        body.Controls.Add(_help, 0, 0);
-        body.Controls.Add(_stats, 0, 1);
+        body.Controls.Add(_notice, 0, 0);
+        body.Controls.Add(_help, 0, 1);
+        body.Controls.Add(_stats, 0, 2);
+        body.Controls.Add(picsRow, 0, 3);
 
         var headRow = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, BackColor = Color.Transparent, Margin = new Padding(0, 0, 0, 8) };
         headRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -129,19 +155,19 @@ internal sealed class MainForm : Form
         _addonPill.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
         headRow.Controls.Add(ht, 0, 0);
         headRow.Controls.Add(_addonPill, 1, 0);
-        body.Controls.Add(headRow, 0, 2);
+        body.Controls.Add(headRow, 0, 4);
 
         StyleGrid();
         var gridFrame = new RoundedPanel { Dock = DockStyle.Fill, FillColor = ColorTranslator.FromHtml("#201B20"), BorderColor = ColorTranslator.FromHtml("#4B3D41"), Radius = 8, Padding = new Padding(1), Margin = new Padding(0, 0, 0, 14) };
         gridFrame.Controls.Add(_grid);
-        body.Controls.Add(gridFrame, 0, 3);
+        body.Controls.Add(gridFrame, 0, 5);
 
         _lower = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, BackColor = Color.Transparent, Margin = Padding.Empty };
         _lower.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
         _lower.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
         _lower.Controls.Add(MineCard(), 0, 0);
         _lower.Controls.Add(JournalCard(), 1, 0);
-        body.Controls.Add(_lower, 0, 4);
+        body.Controls.Add(_lower, 0, 6);
 
         // Sidfot
         var footer = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 3, BackColor = Theme.Footer, Padding = new Padding(20, 9, 20, 9) };
@@ -185,6 +211,17 @@ internal sealed class MainForm : Form
         return card;
     }
 
+    /// <summary>1.0.18: beskedet överst – samma ruta som hjälprutan (guldkant; varningsfärg på kanten vid en varning).</summary>
+    private RoundedPanel NoticeCard()
+    {
+        var card = new RoundedPanel { FillColor = ColorTranslator.FromHtml("#2E2619"), BorderColor = Theme.Gold, Radius = 10, Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(16, 12, 16, 12), Margin = new Padding(0, 0, 0, 14), Visible = false };
+        var s = Stack();
+        s.Controls.Add(_noticeTitle);
+        s.Controls.Add(_noticeBody);
+        card.Controls.Add(s);
+        return card;
+    }
+
     private RoundedPanel MineCard()
     {
         var card = Card();
@@ -198,6 +235,7 @@ internal sealed class MainForm : Form
         nums.Controls.Add(Num(_accepted, S("mine.accepted")));
         s.Controls.Add(nums);
         s.Controls.Add(_mineDetail);
+        s.Controls.Add(_pending); // 1.0.18: "+40 poäng väntar på att en spelare till bekräftar" – direkt ovanför förklaringen nedan
         s.Controls.Add(new Label { Text = S("mine.hint"), AutoSize = true, MaximumSize = new Size(460, 0), Font = Theme.Ui(8.5f), ForeColor = Theme.Faint, BackColor = Color.Transparent, Margin = new Padding(0, 8, 0, 0) });
         card.Controls.Add(s);
         return card;
@@ -392,6 +430,11 @@ internal sealed class MainForm : Form
         _rank.Text = st.Rank is int r ? "#" + r.ToString("N0", Culture) : "–";
         _confirmedCount.Text = st.ConfirmedTotal is int cc ? cc.ToString("N0", Culture) : "–";  // bara från servern
         _accepted.Text = st.AcceptedTotal is int a ? a.ToString("N0", Culture) : "–";
+        // 1.0.18: bilderna (serverns siffror, annars det appen själv har skickat) och poängen som väntar på bekräftelse
+        _pics.Text = Overview.PicturesLine(st);
+        var pending = Overview.PendingLine(st);
+        _pending.Text = pending ?? "";
+        _pending.Visible = pending != null;
 
         _mineDetail.SuspendLayout();
         _mineDetail.Controls.Clear();
@@ -419,6 +462,20 @@ internal sealed class MainForm : Form
             }
         }
         _mineDetail.ResumeLayout();
+    }
+
+    /// <summary>1.0.18: visar eller döljer beskedet överst (<see cref="ScoutApp.Notice"/>).</summary>
+    public void ShowNotice()
+    {
+        if (IsDisposed || Disposing || _notice is null || _notice.IsDisposed) return;
+        var n = _app.Notice;
+        if (n is null) { _notice.Visible = false; return; }
+        _noticeTitle.Text = n.Title;
+        _noticeBody.Text = n.Body ?? "";
+        _noticeBody.Visible = !string.IsNullOrEmpty(n.Body);
+        _notice.BorderColor = n.Warning ? Theme.Warn : Theme.Gold;
+        _notice.Visible = true;
+        _notice.Invalidate();
     }
 
     public void ShowJournal()

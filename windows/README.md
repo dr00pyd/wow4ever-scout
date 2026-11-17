@@ -33,7 +33,7 @@ flytta – bara addonens och självuppdateringens fasta namn) kontrolleras via h
 | `Cache\ADB\*\DBCache.bin` | läsa (hotfix-cachen) |
 | `Cache\WDB\*\creaturecache.wdb` | läsa (varelsecachen, 1.0.14 – inga andra filer i `Cache\WDB`) |
 | `Screenshots\WoWScrnShot_MMDDYY_HHMMSS.jpg` (även `.jpeg`, `.png`, `.tga`) | läsa (1.0.15) – bara spelets egna skärmbilder, och av dem öppnas **bara** den som en `/scout bild`-post i addonens fil pekar ut. Filen ändras, flyttas och raderas aldrig |
-| `Interface`, `Interface\AddOns`, `WTF`, `WTF\Account`, `WTF\Account\*`, `…\SavedVariables`, `Cache`, `Cache\ADB`, `Cache\ADB\*`, `Screenshots` | bara existens och kataloglistning, för att hitta filerna ovan |
+| `Interface`, `Interface\AddOns`, `WTF`, `WTF\Account`, `WTF\Account\*`, `…\SavedVariables`, `Cache`, `Cache\ADB`, `Cache\ADB\*`, `Screenshots` | bara existens och kataloglistning, för att hitta filerna ovan. 1.0.18: dessutom **ändringstiden** för `…\SavedVariables` (själva mappen – inget i den öppnas och inga andra filnamn läses), för att se att spelet har sparat |
 
 Andra filer i WoW-katalogen nekas, till exempel egna bilder och underkataloger i `Screenshots`, andra addons SavedVariables (de två auktionsfilerna ovan när delningen är av, och Auctioneers `Auc-ScanData.lua` med säljarnamn alltid), `Config.wtf`, `config-cache.wtf` och `Wow.exe`.
 
@@ -186,6 +186,35 @@ vid fokus och statuspiller.
   vid fel. Verktygstipset visar poäng och senaste status.
 - All text finns på svenska och engelska (`ForeverScout.Core/Strings.cs`). Core-fel bär koder (`ErrorCodes`) som
   översätts där. Testerna kräver sv och en för varje nyckel och varje felkod.
+
+## 1.0.18 – bildstatus, /reload, kvitto i spelet, varning när inget skickas
+Allt nytt ligger i `ForeverScout.Core` och är samma på Windows, macOS och Linux.
+- **Bilder och "Mina bilder"** (`Overview.cs`). En rad under översiktskorten: "Bilder: 3 publicerade · 1 väntar på
+  granskning · 0 avvisade" och länken **Mina bilder** (`/bidra/bilder`, engelska `/en/contribute/pictures`). Siffrorna
+  kommer från det valfria fältet `media` i `GET /api/bidrag/jag`; saknas det visas antalet bilder appen själv har
+  skickat. I "Mitt bidrag" står poängen som väntar på att en spelare till bekräftar (`pendingPoints`/`pendingFinds`),
+  direkt ovanför "Bekräftat = minst två spelare har rapporterat samma sak."
+- **Påminnelsen om `/reload`** (`ReloadReminder` i `GameWatch.cs`). När klienten byter en redan installerad addon
+  använder ett spel som kör de gamla filerna tills spelaren skriver `/reload`. Appen visar en bubbla, en rad i
+  lägerjournalen och ett besked överst i fönstret: "Addonen uppdaterades till x – skriv /reload i spelet". Beskedet tas
+  bort när en uppladdning kommer från den nya addonversionen, när spelet har sparat efter bytet (en sparning sker vid
+  `/reload`, utloggning och avslut) eller efter ett dygn. **Appen listar inga processer** och vet därför inte om spelet
+  kör just då – texten säger själv att inget behöver göras om spelet inte är igång. Bubblan ersätter den gamla
+  "Addonen uppdaterades till x", så det blir inte fler bubblor än förut.
+- **Kvittot i spelet** (`AddonReceipt.cs`). Efter varje lyckad uppladdning skriver klienten
+  `Interface\AddOns\ForeverScout\Receipt.lua`: `ForeverScoutReceipt = { v = 1, t = <unixtid>, finds = n, shots = n,
+  pending = n, pendingFinds = n }` – bara heltal och klientens egen tidsstämpel, aldrig text från servern. Addonen
+  (1.0.26) säger vid nästa inloggning "Senast skickat för 3 min sedan: 12 fynd och 1 bild(er) mottagna …". Addonen
+  kommer med en tom standardfil; när addonen installeras eller uppdateras behålls ett befintligt kvitto (det läses
+  strikt – bara klientens eget format – och skrivs om från talen, aldrig kopierat).
+- **Varningen när inget skickas** (`SilentSession` i `GameWatch.cs`). Spelet skriver alla laddade addons filer i
+  `WTF\Account\<konto>\SavedVariables` vid `/reload`, utloggning och avslut, och då ändras mappens ändringstid. Har
+  mappen ändrats men `ForeverScout.lua` inte skrivits i samma veva (eller saknas) var addonen inte laddad. Då visas
+  en bubbla, en rad i lägerjournalen och ett besked överst med troliga orsaker (addonen inte ikryssad, installerad
+  medan spelet var igång, fel WoW-katalog). Högst en gång per spelsession: efter en varning är det tyst i 12 timmar.
+  Det som inte går att se utan att lista processer: ett spel som körs utan att ha sparat alls, och ett spel som sparar
+  i en helt annan katalog än den valda.
+- Tester: `tests/Release118Tests.cs` (delas med `client/mac/tests`) och `tests/Release118UiTests.cs` (det riktiga fönstret).
 
 ## Minne (1.0.11)
 Appen ligger i fältet i dagar, så det som syns i Aktivitetshanteraren är arbetsmängden i fältläget. 1.0.10 läste

@@ -418,6 +418,29 @@ public sealed class ShotTests : IDisposable
         Assert.Equal("queued", set.Shots["abcd1234"].Status);
     }
 
+    /// <summary>
+    /// 1.0.18: servern svarar 426 client-too-old med "retry": true på bildvägen när klienten är äldre än guidens lägsta
+    /// version. Bilden ska då ligga kvar och skickas efter uppdateringen – utan "retry" hade den kastats som avvisad.
+    /// </summary>
+    [Fact]
+    public async Task TooOldClientKeepsThePictureUntilItIsUpdated()
+    {
+        var (dir, _, _, _) = Game();
+        var (up, srv, set, _, _) = NewUploader();
+        srv.Status = (HttpStatusCode)426;
+        srv.Error = """{"error":"x","code":"client-too-old","min":"1.0.19","detail":"Uppdatera Forever Scout till 1.0.19 eller senare.","retry":true}""";
+        var report = await up.SyncAsync(dir, force: false);
+        Assert.Equal(0, report.ShotsUploaded);
+        Assert.True(set.Shots["abcd1234"].Pending);
+
+        srv.Status = HttpStatusCode.OK;
+        srv.Ok = """{"ok":true,"status":"queued"}""";
+        srv.Calls.Clear();
+        report = await up.SyncAsync(dir, force: false);
+        Assert.Equal(1, report.ShotsUploaded);
+        Assert.Equal("queued", set.Shots["abcd1234"].Status);
+    }
+
     [Fact]
     public async Task ConflictIsGivenUpAfter24Hours()
     {

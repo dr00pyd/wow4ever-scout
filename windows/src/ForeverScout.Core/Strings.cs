@@ -111,6 +111,9 @@ public static class Strings
         ["update.available"] = ("Version {0} finns – klicka här för att uppdatera.", "Version {0} is available – click here to update."),
         ["menu.update.to"] = ("Uppdatera till {0}…", "Update to {0}…"),
         ["update.none"] = ("Du har senaste versionen ({0}).", "You have the latest version ({0})."),
+        ["update.required"] = ("Guiden tar bara emot bidrag från version {0} eller senare. Du har {1} – uppdatera för att fortsätta bidra.", "The guide only accepts contributions from version {0} or later. You have {1} – update to keep contributing."),
+        ["update.required.store"] = ("Guiden tar bara emot bidrag från version {0} eller senare. Du har {1}. Öppna Microsoft Store, gå till Nedladdningar och välj Hämta uppdateringar.", "The guide only accepts contributions from version {0} or later. You have {1}. Open Microsoft Store, go to Downloads and choose Get updates."),
+        ["notice.from"] = ("Besked från guiden: {0}", "Message from the guide: {0}"),
         ["update.ready"] = ("Version {0} är nedladdad, signaturen är kontrollerad. Starta om nu?", "Version {0} is downloaded and its signature verified. Restart now?"),
         ["update.addon"] = ("Addonen uppdaterades till {0}.", "The addon was updated to {0}."),
         ["update.fail"] = ("Uppdateringen misslyckades: {0}", "Update failed: {0}"),
@@ -235,6 +238,34 @@ public static class Strings
         ["mine.newbie"] = ("Nybliven scout", "Fledgling scout"),
         ["mine.newbie.text"] = ("Ditt första bekräftade fynd väntar. Varje karta börjar med ett steg.", "Your first confirmed find awaits. Every map starts with a single step."),
         ["mine.hint"] = ("Bekräftat = minst två spelare har rapporterat samma sak.", "Confirmed = at least two players reported the same thing."),
+        // 1.0.18: poäng som väntar på en bekräftelse till, och spelarens Scout-bilder (Overview.cs)
+        ["mine.pending"] = ("+{0} poäng väntar på att en spelare till bekräftar ({1} fynd)", "+{0} points are waiting for one more player to confirm ({1} finds)"),
+        ["mine.pending.points"] = ("+{0} poäng väntar på att en spelare till bekräftar", "+{0} points are waiting for one more player to confirm"),
+        ["pics.server"] = ("Bilder: {0} publicerade · {1} väntar på granskning · {2} avvisade", "Pictures: {0} published · {1} awaiting review · {2} rejected"),
+        ["pics.local"] = ("Bilder: {0} skickade", "Pictures: {0} sent"),
+        ["pics.none"] = ("Bilder: inga än – ta en i spelet med /scout bild", "Pictures: none yet – take one in the game with /scout shot"),
+        ["pics.mine"] = ("Mina bilder", "My pictures"),
+        // 1.0.18: addonen byttes medan en äldre fanns på plats – spelet laddar den nya först efter /reload (ReloadReminder)
+        ["reload.notice"] = ("Addonen uppdaterades till {0} – skriv /reload i spelet", "The addon was updated to {0} – type /reload in the game"),
+        ["reload.notice.body"] = ("Spelet använder den gamla versionen tills du skriver /reload eller startar om det. Är spelet inte igång behöver du inte göra något.",
+            "The game keeps using the old version until you type /reload or restart it. If the game is not running you do not need to do anything."),
+        ["journal.reload"] = ("{0}: addonen uppdaterad till {1} – skriv /reload i spelet", "{0}: addon updated to {1} – type /reload in the game"),
+        // 1.0.18: spelet sparade, men addonen skrev inte sin fil (SilentSession) – högst en gång per spelsession
+        ["silent.title"] = ("Spelet sparade, men addonen ForeverScout sparade ingenting", "The game saved, but the ForeverScout addon saved nothing"),
+        ["silent.body"] = (
+            "Då finns inget att skicka. Troliga orsaker:\n"
+            + "1. Addonen är inte ikryssad. Tryck på AddOns på karaktärsvalet och bocka i ForeverScout – valet gäller per karaktär.\n"
+            + "2. Addonen installerades eller uppdaterades medan spelet var igång. Avsluta WoW helt och starta det igen.\n"
+            + "3. Fel WoW-katalog. Kontrollera i Inställningar att katalogen är den du spelar WoW Forever från.\n"
+            + "Skriv /scout i chatten: svarar ForeverScout är addonen igång, och datan skickas efter nästa /reload eller utloggning.",
+            "So there is nothing to send. Likely causes:\n"
+            + "1. The addon is not ticked. Click AddOns on the character screen and tick ForeverScout – the choice is per character.\n"
+            + "2. The addon was installed or updated while the game was running. Quit WoW completely and start it again.\n"
+            + "3. Wrong WoW folder. Check in Settings that the folder is the one you play WoW Forever from.\n"
+            + "Type /scout in chat: if ForeverScout answers, the addon is running, and the data is sent after the next /reload or logout."),
+        ["silent.toast"] = ("Spelet sparade, men addonen ForeverScout sparade ingenting – inget skickades. Öppna Forever Scout för troliga orsaker.",
+            "The game saved, but the ForeverScout addon saved nothing – nothing was sent. Open Forever Scout for the likely causes."),
+        ["journal.silent"] = ("{0}: spelet sparade men addonen sparade inget – orsaker överst i fönstret", "{0}: the game saved but the addon saved nothing – causes at the top of the window"),
         ["journal.title"] = ("Scoutens lägerjournal", "Scout's camp journal"),
         ["journal.addon"] = ("Addon {0} installerad", "Addon {0} installed"),
         ["journal.uploaded"] = ("{0}: servern tog emot {1} fil(er)", "{0}: the server received {1} file(s)"),
@@ -280,9 +311,9 @@ public static class Strings
         ["err.no-key"] = ("Klienten är inte kopplad – registrera dig eller koppla med kod.", "The client is not linked – register or link with a code."),
         ["err.empty-response"] = ("Tomt svar från servern.", "Empty response from the server."),
         ["err.bad-response"] = ("Oväntat svar från servern.", "Unexpected response from the server."),
-        ["err.upload-too-large"] = ("Filen är större än 5 MB.", "The file is larger than 5 MB."),
-        ["err.hotfix-too-large"] = ("DBCache.bin är större än 30 MB.", "DBCache.bin is larger than 30 MB."),
-        ["err.creaturecache-too-large"] = ("creaturecache.wdb är större än 8 MB.", "creaturecache.wdb is larger than 8 MB."),
+        ["err.upload-too-large"] = ("Filen är orimligt stor och skickas inte.", "The file is unreasonably large and is not sent."),
+        ["err.hotfix-too-large"] = ("DBCache.bin är orimligt stor och skickas inte.", "DBCache.bin is unreasonably large and is not sent."),
+        ["err.creaturecache-too-large"] = ("creaturecache.wdb är orimligt stor och skickas inte.", "creaturecache.wdb is unreasonably large and is not sent."),
         ["err.shot-too-large"] = ("Bilden är större än 1,5 MB även efter förminskning.", "The picture is larger than 1.5 MB even after scaling down."),
         ["err.download-too-large"] = ("Nedladdningen är för stor.", "The download is too large."),
         ["err.other-host"] = ("Nedladdningen pekar på en annan värd – avbruten.", "The download points to another host – aborted."),
@@ -334,13 +365,16 @@ public static class Strings
         ["linux.about.variant.full"] = ("Linux", "Linux"),
         ["linux.update.inuse"] = ("Kunde inte uppdatera Forever Scout. Ladda ner den nya versionen från nedladdningssidan.", "Could not update Forever Scout. Download the new version from the download page."),
         ["linux.gamedir.confirm"] = ("Forever Scout hittade den här spelkatalogen:\n\n{0}\n\nÄr det din WoW Forever-katalog? Scout installerar addonen där och laddar upp addonens data därifrån. Den ligger i Wine-prefixet där du installerade Battle.net (Lutris, Steam/Proton eller Bottles).\n\nVälj Nej om du inte känner igen den – då får du välja katalogen själv.", "Forever Scout found this game folder:\n\n{0}\n\nIs this your WoW Forever folder? Scout installs the addon there and uploads the addon's data from it. It is inside the Wine prefix where you installed Battle.net (Lutris, Steam/Proton or Bottles).\n\nChoose No if you do not recognise it – you can then pick the folder yourself."),
-        ["linux.update.manual"] = ("Version {0} finns. På Linux uppdaterar appen inte sig själv än: ladda ner den nya filen och packa upp den över den gamla. (Addonen uppdateras automatiskt.)\n\nÖppna nedladdningssidan nu?", "Version {0} is available. On Linux the app does not update itself yet: download the new file and unpack it over the old one. (The addon updates automatically.)\n\nOpen the download page now?"),
+        // 1.0.18: AppImage-filen byts automatiskt (AppImageUpdater). Texten nedan gäller bara när det inte går –
+        // appen körs inte som AppImage, eller filen ligger där den inte får bytas.
+        ["linux.update.manual"] = ("Version {0} finns. Här kan appen inte byta ut sig själv (den körs inte som AppImage, eller filen ligger i en skrivskyddad mapp): ladda ner den nya filen och ersätt den gamla. (Addonen uppdateras automatiskt.)\n\nÖppna nedladdningssidan nu?", "Version {0} is available. The app cannot replace itself here (it is not running as an AppImage, or the file is in a read-only folder): download the new file and replace the old one. (The addon updates automatically.)\n\nOpen the download page now?"),
         ["linux.update.manual.log"] = ("Version {0} finns – hämta den från nedladdningssidan (menyn: Sök efter uppdateringar).", "Version {0} is available – get it from the download page (menu: Check for updates)."),
 
         // ---- Serverns felkoder (lib/scout/http.ts, fältet "code") ----
         ["srv.origin"] = ("Fel ursprung.", "Wrong origin."),
         ["srv.rate-limited"] = ("För många försök – vänta en stund.", "Too many attempts – please wait a moment."),
-        ["srv.too-large"] = ("För stor förfrågan.", "Request too large."),
+        ["srv.too-large"] = ("Filen är större än guiden tar emot just nu.", "The file is larger than the guide accepts right now."),
+        ["srv.client-too-old"] = ("Den här versionen av Forever Scout är för gammal – uppdatera för att fortsätta bidra.", "This version of Forever Scout is too old – update to keep contributing."),
         ["srv.invalid"] = ("Ogiltig förfrågan.", "Invalid request."),
         ["srv.name-length"] = ("Namnet ska vara 2–24 tecken.", "The name must be 2–24 characters."),
         ["srv.name-chars"] = ("Ogiltiga tecken i namnet.", "Invalid characters in the name."),

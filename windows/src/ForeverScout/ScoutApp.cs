@@ -24,6 +24,9 @@ internal sealed class ScoutApp : ApplicationContext
     public string? ErrorText => _errorText ?? _addonError;
     /// <summary>Finns minst en ForeverScout.lua (dvs. har spelet sparat addonens data någon gång)?</summary>
     public bool HasSavedVariables { get; private set; }
+    /// <summary>1.0.18: beskedet överst i fönstret – påminnelsen om /reload eller varningen när spelet sparar utan att
+    /// addonen gör det (<see cref="GameWatch"/>). Null = inget.</summary>
+    public Notice? Notice { get; private set; }
 
     /// <summary>Scoutens lägerjournal: senaste händelserna (tid, text, färg), nyast först, högst 6.</summary>
     public IReadOnlyList<(DateTime At, string Text, Color Color)> Journal => _journal;
@@ -136,6 +139,7 @@ internal sealed class ScoutApp : ApplicationContext
         InstallBundledAddonIfNeeded();
         RefreshStats(force: true);
         UpdateStatus();
+        WatchGame();
         _tick.Start();
         await RefreshMe();
         await CheckUpdates(interactive: false); // signerad addon + spärrlistan (tyst)
@@ -247,9 +251,14 @@ internal sealed class ScoutApp : ApplicationContext
             if (Settings.BlockedAddons.Contains(bundled ?? "")) return; // spärrad: väntar på signerad addon
             if (AddonInstaller.NeedsInstall(dir, AddonBundle.Files))
             {
+                var previous = AddonInstaller.InstalledVersion(dir);
                 AddonInstaller.Install(dir, AddonBundle.Files);
-                Toast("Forever Scout", F("addon.installed", bundled));
-                Log(F("journal.addon", bundled), Theme.Ok);
+                // 1.0.18: byttes en redan installerad addon laddar spelet den nya först efter /reload – säg det.
+                if (!RemindReload(previous, bundled, null))
+                {
+                    Toast("Forever Scout", F("addon.installed", bundled));
+                    Log(F("journal.addon", bundled), Theme.Ok);
+                }
             }
         }
         catch (Exception ex) when (ex is ScoutException or IOException or UnauthorizedAccessException) { SetAddonError(Error(ex)); return; }
@@ -260,6 +269,43 @@ internal sealed class ScoutApp : ApplicationContext
     {
         _addonError = text;
         UpdateStatus();
+    }
+
+    /// <summary>
+    /// 1.0.18: addonfilerna har bytts. Fanns en äldre addon på plats använder ett spel som kör just nu de gamla filerna
+    /// tills spelaren skriver /reload – bubbla, rad i lägerjournalen och ett besked överst i fönstret som ligger kvar
+    /// tills spelet har sparat eller en uppladdning kommer från den nya versionen (<see cref="ReloadReminder"/>).
+    /// </summary>
+    /// <param name="before">Text som ska stå före påminnelsen i bubblan (t.ex. att den gamla versionen var spärrad).</param>
+    /// <returns>False om det var en första installation (då gäller det vanliga beskedet).</returns>
+    private bool RemindReload(string? previous, string? installed, string? before)
+    {
+        if (!ReloadReminder.OnInstalled(Settings, previous, installed, DateTime.UtcNow)) return false;
+        try { Settings.Save(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SafeFsException) { }
+        Log(F("journal.reload", When(DateTime.UtcNow), installed), Theme.Gold);
+        Toast("Forever Scout", (before is null ? "" : before + "\n\n") + F("reload.notice", installed) + (before is null ? "\n" + S("reload.notice.body") : ""));
+        WatchGame();
+        return true;
+    }
+
+    /// <summary>
+    /// 1.0.18: det appen ser av spelet genom filerna (var 15:e sekund och efter varje uppladdning): påminnelsen om
+    /// /reload tas bort när den inte längre gäller, och om spelet har sparat utan att addonen gjorde det visas en
+    /// varning – en gång per spelsession. Inga processer listas.
+    /// </summary>
+    internal void WatchGame()
+    {
+        var r = GameWatch.Tick(CurrentDir, Settings, DateTime.UtcNow);
+        if (r.NewSilentWarning)
+        {
+            Log(F("journal.silent", When(DateTime.UtcNow)), Theme.Warn);
+            // Syns fönstret står orsakerna redan överst i det – då räcker en rad i statusraden, ingen bubbla.
+            if (Live is { Visible: true } open) open.Flash(S("silent.title"), 10000);
+            else Toast("Forever Scout", S("silent.toast"));
+        }
+        if (Equals(Notice, r.Notice)) return;
+        Notice = r.Notice;
+        Live?.ShowNotice();
     }
 
     // ------------------------------------------------------------------ data
@@ -308,6 +354,7 @@ internal sealed class ScoutApp : ApplicationContext
             if (me.Name is { Length: > 0 } n) Settings.ContributorName = n;
             Settings.AcceptedTotal = me.AcceptedTotal();
             Settings.ConfirmedTotal = me.Confirmed; // null tills servern skickar fältet "confirmed" → visas som "–"
+            Overview.Apply(Settings, me);           // 1.0.18: poäng som väntar på bekräftelse och spelarens bilder (valfria fält)
             if (me.Recent is { Count: > 0 } recent && Settings.LastConfirmed.Count == 0)
                 Settings.LastConfirmed = recent.Select(ToConfirmed).OfType<ConfirmedItem>().Take(5).ToList();
             Settings.Save();
@@ -384,6 +431,7 @@ internal sealed class ScoutApp : ApplicationContext
     {
         RefreshStats(force: false);
         UpdateStatus();
+        WatchGame();
         if (_uploader.RetryDue && AutoUploadActive) _sync.Notify();
         if (DateTime.UtcNow - _meAt > MeEvery) await RefreshMe();
         if (DateTime.UtcNow - _versionAt > VersionEvery) await CheckUpdates(interactive: false);
@@ -435,7 +483,11 @@ internal sealed class ScoutApp : ApplicationContext
         RefreshStats(force: true);
         Live?.ShowContribution();
         UpdateStatus();
-        if (report.FilesUploaded > 0) await RefreshMe();
+        if (report.FilesUploaded > 0 || report.ShotsUploaded > 0) await RefreshMe(); // 1.0.18: även efter bara bilder (bildraden)
+        // 1.0.18: kvittot i spelet – efter RefreshMe, så att poängen som väntar på bekräftelse är färska. Skrivs bara
+        // i addonens egen mapp i WoW-katalogen och innehåller bara tal (AddonReceipt).
+        AddonReceipt.AfterUpload(CurrentDir, Settings, report, DateTimeOffset.UtcNow);
+        WatchGame();
         // Parsern och uppladdningen lämnar skräp på heapen; i fältet syns det bara som minne. Städa när fönstret är dolt.
         if (Live is not { Visible: true }) MemoryTrim.Trim();
     }
@@ -463,14 +515,35 @@ internal sealed class ScoutApp : ApplicationContext
         finally { _checking = false; }
     }
 
+    private bool _requiredShown;
+
+    /// <summary>
+    /// 1.0.18: det som guiden säger i den signerade versionsinfon – ett kort besked (en gång per text) och att den här
+    /// versionen är äldre än den lägsta som får bidra (en gång per körning). Rad i lägerjournalen och en bubbla.
+    /// </summary>
+    private void Announce(SignedRelease release)
+    {
+        if (Settings.TakeNotice(release, Strings.IsSv) is { } note)
+        {
+            Log(F("notice.from", note), Theme.Gold);
+            _tray.ShowBalloonTip(10000, "Forever Scout", note, ToolTipIcon.Info);
+        }
+        if (_requiredShown || !release.TooOld(SelfUpdater.CurrentVersion)) return;
+        _requiredShown = true;
+        var text = F(BuildInfo.IsStore ? "update.required.store" : "update.required", release.MinClient, SelfUpdater.CurrentVersion.ToString(3));
+        Log(text, Theme.Err);
+        _tray.ShowBalloonTip(15000, "Forever Scout", text, ToolTipIcon.Warning);
+    }
+
     private async Task CheckUpdatesCore(bool interactive)
     {
         try
         {
             // L10: signature2 krävs (ReleaseVerifier) och "issued" får inte vara äldre än den senaste vi sett.
-            var release = Settings.AcceptRelease(await Api.VersionAsync(UpdateKeys.PublicKeyPem, Settings.Beta), Settings.Beta);
+            var release = Settings.AcceptRelease(await Api.VersionAsync(Settings.TrustedKeys, Settings.Beta), Settings.Beta);
             Settings.BlockedAddons = release.BlockedAddons.ToList();
             Settings.Save();
+            Announce(release);
             await UpdateAddon(release, interactive, announceBlocked: false, alsoBlocked: null);
             // Efter en versionskontroll: försök igen med filer som servern tidigare avvisade (servern kan ha rättats).
             // Oförändrade, redan uppladdade filer skickas inte (sha256), så detta kostar inget annars.
@@ -479,7 +552,10 @@ internal sealed class ScoutApp : ApplicationContext
             // Microsoft Store uppdaterar appen själv (Store-regel; paketkatalogen är skrivskyddad) – bara addonen ovan.
             if (BuildInfo.IsStore)
             {
-                if (interactive) Message(F("update.none", SelfUpdater.CurrentVersion.ToString(3)), S("app"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // 1.0.18: är versionen äldre än guidens lägsta säger appen det i stället för "du har senaste versionen".
+                if (interactive && release.TooOld(SelfUpdater.CurrentVersion))
+                    Message(F("update.required.store", release.MinClient, SelfUpdater.CurrentVersion.ToString(3)), S("app"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else if (interactive) Message(F("update.none", SelfUpdater.CurrentVersion.ToString(3)), S("app"), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -509,7 +585,7 @@ internal sealed class ScoutApp : ApplicationContext
             }
             if (!interactive) Log(F("journal.autoupdate", When(DateTime.UtcNow), newVersion), Theme.Gold);
             byte[] exe;
-            try { exe = await Api.DownloadReleaseFileAsync(release, kind, UpdateKeys.PublicKeyPem, 400L * 1024 * 1024); }
+            try { exe = await Api.DownloadReleaseFileAsync(release, kind, Settings.TrustedKeys, 400L * 1024 * 1024); }
             catch (Exception ex) when (ex is ScoutException or IOException or UnauthorizedAccessException) { throw new UpdateStepException(UpdateSteps.Download, ex, null); }
             // Stage och Swap gör blockerande omförsök (upp till ~15 s per steg) – kör dem utanför UI-tråden.
             await Task.Run(() => SelfUpdater.Stage(exe));
@@ -570,7 +646,7 @@ internal sealed class ScoutApp : ApplicationContext
         {
             // Spärrar som uppladdningen just lärt sig (422) gäller tills nästa versionskontroll, även om versionsinfon inte nämner dem.
             var learned = Settings.BlockedAddons.ToList();
-            var release = Settings.AcceptRelease(await Api.VersionAsync(UpdateKeys.PublicKeyPem, Settings.Beta), Settings.Beta);
+            var release = Settings.AcceptRelease(await Api.VersionAsync(Settings.TrustedKeys, Settings.Beta), Settings.Beta);
             Settings.BlockedAddons = release.BlockedAddons.Union(learned).ToList();
             Settings.Save();
             await UpdateAddon(release, interactive: false, announceBlocked: true, alsoBlocked: learned);
@@ -601,13 +677,15 @@ internal sealed class ScoutApp : ApplicationContext
                 if (interactive) Message(wait, S("app"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
         }
-        var zip = await Api.DownloadReleaseFileAsync(release, ReleaseKind.Addon, UpdateKeys.PublicKeyPem, 20 * 1024 * 1024);
+        var zip = await Api.DownloadReleaseFileAsync(release, ReleaseKind.Addon, Settings.TrustedKeys, 20 * 1024 * 1024);
         AddonInstaller.Install(dir, AddonInstaller.FromZip(zip));
         _errorText = null;
         _addonError = null;
         var msg = announceBlocked ? F("addon.blocked", release.Addon) : F("update.addon", release.Addon);
-        if (interactive) Message(msg, S("app"), MessageBoxButtons.OK, MessageBoxIcon.Information);
-        else Toast("Forever Scout", msg);
+        // 1.0.18: fanns en äldre addon på plats ersätts bubblan av påminnelsen om /reload (samma antal bubblor som förut).
+        bool reminded = RemindReload(installed, release.Addon, announceBlocked ? msg : null);
+        if (interactive) Message(reminded ? msg + "\n\n" + F("reload.notice", release.Addon) + "\n" + S("reload.notice.body") : msg, S("app"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+        else if (!reminded) Toast("Forever Scout", msg);
         Live?.ShowStatus();
     }
 

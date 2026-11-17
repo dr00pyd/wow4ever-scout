@@ -32,6 +32,7 @@ All fil- och processåtkomst går genom `SafeFs.cs` (samma statiska vakt, `Stati
 | `Interface`, `WTF/Account/*`, `…/SavedVariables`, `Cache/ADB/*`, `Cache/WDB/*`, `Screenshots` | bara existens och listning |
 | `~/.config/ForeverScout/**` (katalogen 0700; `$XDG_CONFIG_HOME` följs) | `settings.json`, `uploads.log`, `instance.lock`, `instance.sock`, `contributor-key` (0600) |
 | `~/.config/autostart/se.wow4ever.foreverscout.desktop` | när "Starta vid inloggning" är på – från 1.0.12 förvalt på välkomstskärmen (går att kryssa ur), annars av tills du kryssar i den i Inställningar |
+| AppImage-filen själv (`$APPIMAGE`) och `<fil>.new` bredvid den | 1.0.18: självuppdateringen – bara de två filerna (och `.new.tmp` under skrivningen), inget annat i mappen |
 
 **Var spelet söks.** Spelet körs genom Wine, så det ligger i ett Wine-prefix:
 `<prefix>/drive_c/Program Files (x86)/World of Warcraft/_forever_` (eller `Program Files`). Appen provar dessa prefix:
@@ -55,8 +56,16 @@ som inte går att läsa vid inloggning hade stoppat uppladdningen i tysthet.
 ## Skillnader mot macOS-appen
 - **Fönstret visas vid start** (utom med `--tray`, som autostart använder). Alla skrivbord har inte fältikoner – GNOME
   kräver ett tillägg. Startas appen en gång till visar den körande instansen sitt fönster.
-- **Ingen självuppdatering än.** Appen läser den signerade versionsinfon (linux-fälten, `signature5`) och säger till när
-  en nyare version finns, med länk till nedladdningssidan. Addonen uppdateras automatiskt som på de andra plattformarna.
+- **Självuppdatering från 1.0.18** (`ForeverScout.Core/AppImageUpdater.cs`), med samma kontroll som Windows och macOS:
+  versionsinfon verifieras med `signature5` och den publika nyckeln i `UpdateKeys.cs`, och AppImage-filen mot sitt
+  signerade SHA-256 och sin filsignatur. Filen måste se ut som en AppImage (ELF och märket `AI\x02`), sparas som
+  `<AppImage>.new` bredvid den körande filen, får samma rättigheter som den gamla och byts in med **ett** namnbyte
+  (`rename(2)` ersätter målet atomärt; den körande appen fortsätter från den gamla filen tills den avslutas). Sedan
+  startas den nya filen med `--restarted`. Som på Windows: tyst var 3:e timme, aldrig mitt i en uppladdning, och efter
+  tre misslyckade försök i rad bara som en rad i lägerjournalen.
+  **Bara när appen körs som AppImage (`$APPIMAGE`) och filen går att byta** (det prövas genom att skapa och ta bort en
+  tom `<AppImage>.new`). Annars – uppackad tar.gz, skrivskyddad mapp – säger appen till och länkar till
+  nedladdningssidan, som före 1.0.18. Addonen uppdateras automatiskt som på de andra plattformarna.
 - **I en AppImage** körs binären från en tillfällig montering (`/tmp/.mount_…`). Autostart och omstart pekar därför på
   själva AppImage-filen (`$APPIMAGE`, `SafeFs.LinuxLaunchPath`).
 
@@ -66,6 +75,17 @@ på välkomstskärmen och en fråga en gång till befintliga användare som sjä
 efter `--restarted`), ärlig status och statusrad, "Välj WoW-katalog" som huvudknapp utan spelkatalog (utan
 mappsymbol – alla skrivbord har inte ett färgemoji-typsnitt), ingen dialog vid autostart (rad i lägerjournalen och
 fältikonen med röd prick i stället), addonens fel ligger kvar efter nästa synk, och Enter väljer guldknappen.
+
+## 1.0.18
+Samma som Windows 1.0.18 (se "1.0.18" i `client/windows/README.md`): bildraden med länken Mina bilder, poäng som väntar
+på bekräftelse, påminnelsen om `/reload` (rad i lägerjournalen och besked överst i fönstret – Linux och macOS har inga
+bubblor), kvittot i spelet (`Receipt.lua` i addonens mapp) och varningen när spelet sparar utan att addonen gör det.
+Dessutom självuppdateringen ovan. Beta-kanalen ("Betaversioner" i Inställningar) fanns redan och gäller även
+självuppdateringen: `scout-sign.mjs --channel beta --linux <AppImage> --linux-version <v>`.
+
+**Inte provkört på Linux.** Koden för bytet är körd på Windows mot en låtsasfil (`Release118Tests`); rättigheterna,
+den skrivskyddade mappen och `$APPIMAGE` testas av tre `[LinuxFact]`-tester som bara körs på Linux (`build.sh` kör dem i
+byggcontainern). Ändringstiden på `SavedVariables`-mappen (varningen) är inte provad i ett Wine-prefix.
 
 ## 1.0.17 – bilder tagna med `/scout bild`
 Samma som Windows 1.0.15–1.0.17 och macOS-appen (se "1.0.17" i `client/mac/README.md`); 1.0.15 och 1.0.16 släpptes
@@ -107,7 +127,7 @@ och signaturer behålls. AppImage-filen är gitignorerad (som exe:n och Mac-file
 Nedladdningssidan visar Linux-kortet först när fälten och `signature5` finns och filens SHA-256 stämmer.
 
 ## Tester
-`dotnet test client/mac/tests` – `LinuxTests.cs`: signature5 och linux-fälten (och att Windows och macOS inte
+`dotnet test client/mac/tests` – `Release118MacTests.cs` (1.0.18, se ovan) och `LinuxTests.cs`: signature5 och linux-fälten (och att Windows och macOS inte
 påverkas), autostart-filens citering, och på Linux (`[LinuxFact]`) nyckelfilens rättigheter och sökrötterna.
 Provkört i en Debian-container med virtuell skärm: appen startar, ritar onboarding-fönstret och skapar
 `~/.config/ForeverScout` med 0700. **Inte provkört** på ett riktigt skrivbord med WoW under Wine.

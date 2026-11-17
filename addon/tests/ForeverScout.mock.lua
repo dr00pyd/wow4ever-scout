@@ -83,7 +83,7 @@ ForeverScoutDB = { seq = 7, objects = { [999001] = { n = "Old Chest" }, [999003]
 fire("ADDON_LOADED", "ForeverScout")
 local T = ns._test
 local db = T.db()
-check(db.addon == "1.0.25", "addonversion 1.0.25")
+check(db.addon == "1.0.27", "addonversion 1.0.27")
 check(db.objects[999001].q and db.objects[999001].q > 7 and db.npcs[999002].q and db.npcs[999002].q > 7, "1.0.10: gamla poster utan position får löpnummer vid start")
 check(db.objects[999003].q == nil, "1.0.10: poster med position behåller löpnumret i sina platser")
 check(type(db.mobs) == "table" and type(db.mail) == "table", "mobs och mail finns")
@@ -98,7 +98,7 @@ do
   check(frame.events.PLAYER_LOGIN, "händelsen registrerad: PLAYER_LOGIN")
   fire("PLAYER_LOGIN")
   DEFAULT_CHAT_FRAME.AddMessage = old
-  check(#said == 1 and said[1]:find("1.0.25", 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
+  check(#said == 1 and said[1]:find("1.0.27", 1, true) and said[1]:find("/reload", 1, true), "inloggningsraden nämner version och /reload")
 end
 
 ---------------------------------------------------------------------------
@@ -1075,7 +1075,7 @@ do
   SlashCmdList.FOREVERSCOUT("")
   CreateFrame = oldCF
   DEFAULT_CHAT_FRAME.GetNumMessages, DEFAULT_CHAT_FRAME.GetMaxLines, DEFAULT_CHAT_FRAME.AddMessage = nil, nil, old
-  check(shown and txt and txt:find("1.0.25", 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
+  check(shown and txt and txt:find("1.0.27", 1, true) and not txt:find("|cff7fb4ff", 1, true) and UISpecialFrames[1] == "ForeverScoutPanel",
         "1.0.18: syns inte raden i chatten visas svaret i Forever Scout-fönstret (stängs med Esc)")
 end
 
@@ -1402,12 +1402,26 @@ do
     combat, units.target = false, nil
     check(#db.shots > 0 and db.shots[#db.shots].id == 1234, "1.0.25: (förutsättning) NPC 1234 är redan fotad i den här installationen")
 
-    ForeverScoutShotList = nil
-    check(hover(mob(7777)) == true and #lines == 1 and lines[1] == EN and shows == 1, "1.0.25: saknas listan helt får NPC:n raden (engelska)")
+    -- 1.0.27: saknas listan (ny fil efter /reload – spelet läser den först vid omstart) visas INGEN rad, och spelaren
+    -- får en gång per session veta att spelet ska startas om. Förr fick varje NPC raden och spelare fotade dubbletter.
+    do
+      local said = {}
+      local old = DEFAULT_CHAT_FRAME.AddMessage
+      DEFAULT_CHAT_FRAME.AddMessage = function(_, msg) said[#said + 1] = msg end
+      S.noListSaid = nil
+      ForeverScoutShotList = nil
+      check(hover(mob(7777)) == false and #lines == 0, "1.0.27: saknas listan helt får ingen NPC raden")
+      check(#said == 1 and said[1]:find("Restart the game", 1, true), "1.0.27: utan lista: en rad om att starta om spelet")
+      ForeverScoutShotList = "trasig"
+      check(hover(mob(7777)) == false and #said == 1, "1.0.27: en lista som inte är en tabell räknas som saknad, och raden sägs bara en gång")
+      ForeverScoutShotList = { built = "2026-11-16" }
+      check(hover(mob(7777)) == false and #said == 1, "1.0.27: en lista utan ids räknas som saknad")
+      DEFAULT_CHAT_FRAME.AddMessage = old
+    end
+    ForeverScoutShotList = { built = "", ids = "" }
+    check(hover(mob(7777)) == true and #lines == 1 and lines[1] == EN and shows == 1, "1.0.25: tom lista – NPC:n får raden (engelska)")
     check(S.shotTip(GameTooltip) == false and #lines == 1, "1.0.25: samma rad läggs aldrig till två gånger i samma tooltip")
     check(S.shotTip({ AddLine = GameTooltip.AddLine }) == false and #lines == 1, "1.0.25: bara spelets egen tooltip får raden")
-    ForeverScoutShotList = "trasig"
-    check(hover(mob(7777)) == true, "1.0.25: en lista som inte är en tabell räknas som saknad")
 
     -- filen som följer med addonen (fylls vid släpp), och båda .toc-filerna laddar den före ForeverScout.lua
     ForeverScoutShotList = nil
@@ -1420,13 +1434,13 @@ do
       local txt = f and f:read("*a") or ""
       if f then f:close() end
       local a, b = txt:find("\nShotList.lua", 1, true), txt:find("\nForeverScout.lua", 1, true)
-      check(a and b and a < b and txt:find("## Version: 1.0.25", 1, true), "1.0.25: " .. toc .. " har version 1.0.25 och laddar ShotList.lua före ForeverScout.lua")
+      check(a and b and a < b, "1.0.25: " .. toc .. " laddar ShotList.lua före ForeverScout.lua")
     end
 
-    -- NPC:n finns i listan: ingen rad. Id:n jämförs som hela tal (777 är inte 7777).
+    -- NPC:n finns i listan: ingen rad. Id:n jämförs som hela tal (77 är inte 7777).
     ForeverScoutShotList = { built = "2026-11-16", ids = "12,7777,\n9000" }
     check(hover(mob(7777)) == false and #lines == 0, "1.0.25: NPC i listan får ingen rad")
-    check(hover(mob(777)) == true and hover(mob(9000)) == false and hover(mob(12)) == false, "1.0.25: listans id:n är hela tal, radbrytningar i strängen går bra")
+    check(hover(mob(77)) == true and hover(mob(9000)) == false and hover(mob(12)) == false, "1.0.25: listans id:n är hela tal, radbrytningar i strängen går bra")
     ForeverScoutShotList = { built = "2026-11-17", ids = "12,9000" }
     check(hover(mob(7777)) == true, "1.0.25: en ny lista läses om")
     ForeverScoutShotList = { ids = { 12, 7777 } }
@@ -1434,6 +1448,35 @@ do
     ForeverScoutShotList = { ids = { [7777] = true } }
     check(hover(mob(7777)) == false and hover(mob(12)) == true, "1.0.25: listan får vara en mängd")
     ForeverScoutShotList = { built = "", ids = "" }
+
+    -- 1.0.27: en lista som är äldre än en vecka ger en försiktigare rad (testklockan står på 2026-11-04)
+    local OLD = "Maybe no picture in the guide yet – /scout shot (+5 pts)"
+    ForeverScoutShotList = { built = "2026-10-20", ids = "12" }
+    check(hover(mob(7777)) == true and lines[1] == OLD, "1.0.27: listan äldre än 7 dagar – raden säger 'kanske'")
+    ForeverScoutShotList = { built = "2026-10-30", ids = "12" }
+    check(hover(mob(7777)) == true and lines[1] == EN, "1.0.27: listan 5 dagar gammal – den vanliga raden")
+    ForeverScoutShotList = { built = "2026-13-40", ids = "12" }
+    check(hover(mob(7777)) == true and lines[1] == EN, "1.0.27: ogiltigt datum – den vanliga raden")
+    ForeverScoutShotList = { built = "", ids = "" }
+
+    -- 1.0.27: db.shotIds minns varje fotad NPC, även när bilden har fallit ur db.shots (högst 100)
+    check(type(db.shotIds) == "string" and (","..db.shotIds..","):find(",1234,", 1, true), "1.0.27: shotIds har NPC:n som fotades med /scout bild")
+    local keep = db.shots
+    db.shots = {}
+    check(hover(mob(1234, "Lars")) == false and #lines == 0, "1.0.27: NPC som fotats men fallit ur db.shots får ingen rad")
+    db.shots = keep
+    local keepIds = db.shotIds
+    db.shotIds = ""
+    for i = 1, 5001 do S.mineAdd(100000 + i) end
+    local cnt = 0
+    for _ in db.shotIds:gmatch("%d+") do cnt = cnt + 1 end
+    check(cnt == 5000 and not (","..db.shotIds..","):find(",100001,", 1, true) and (","..db.shotIds..","):find(",105001,", 1, true),
+          "1.0.27: shotIds har högst 5000 id:n, äldsta först ut")
+    S.mineAdd(105001); S.mineAdd(-1); S.mineAdd(1.5); S.mineAdd("7")
+    local cnt2 = 0
+    for _ in db.shotIds:gmatch("%d+") do cnt2 = cnt2 + 1 end
+    check(cnt2 == 5000, "1.0.27: samma id två gånger och ogiltiga id:n ändrar inget")
+    db.shotIds = keepIds
 
     -- redan fotad av spelaren, spelare, husdjur, strid, dolda uppgifter
     check(hover(mob(1234, "Lars")) == false and #lines == 0, "1.0.25: NPC som spelaren redan fotat får ingen rad")
@@ -1532,6 +1575,109 @@ do
   units.target, units.mouseover = nil, nil
   DEFAULT_CHAT_FRAME.AddMessage, C_Timer.After = oldAdd, oldTimer
   UIParent, Screenshot, GameTooltip, GameTooltipTextLeft1, CORPSE_TOOLTIP = nil, nil, nil, nil, nil
+end
+
+---------------------------------------------------------------------------
+-- 1.0.26: kvittot i spelet. Forever Scout-klienten skriver Receipt.lua i addonens mapp efter varje uppladdning
+-- (ForeverScoutReceipt, bara tal); addonen säger "Senast skickat …" vid inloggning och i /scout.
+---------------------------------------------------------------------------
+do
+  local S = T.session
+  local said = {}
+  local oldAdd, oldTimer = DEFAULT_CHAT_FRAME.AddMessage, C_Timer.After
+  DEFAULT_CHAT_FRAME.AddMessage = function(_, msg) said[#said + 1] = msg end
+  C_Timer.After = function(_, fn) fn() end
+  local errors0 = S.errors
+  local NOW = time()
+  ForeverScoutOpt.lang = "en"
+
+  -- .toc-filerna: version 1.0.26 och Receipt.lua före ForeverScout.lua
+  for _, toc in ipairs({ "ForeverScout.toc", "ForeverScout_Forever.toc" }) do
+    local f = io.open(DIR .. toc, "r")
+    local txt = f and f:read("*a") or ""
+    if f then f:close() end
+    local a, b = txt:find("\nReceipt.lua", 1, true), txt:find("\nForeverScout.lua", 1, true)
+    check(a and b and a < b and txt:find("## Version: 1.0.27", 1, true), "1.0.27: " .. toc .. " har version 1.0.27 och laddar Receipt.lua före ForeverScout.lua")
+  end
+
+  -- Standardfilen som följer med addonen: går att ladda, sätter ingenting, och då sägs ingenting
+  ForeverScoutReceipt = "skräp"
+  ForeverScoutReceipt = nil
+  local chunk, err = loadfile(DIR .. "Receipt.lua")
+  check(chunk ~= nil, "1.0.26: standardfilen Receipt.lua går att ladda (" .. tostring(err) .. ")")
+  if chunk then chunk("ForeverScout", ns) end
+  check(ForeverScoutReceipt == nil, "1.0.26: standardfilen sätter inget kvitto")
+  check(S.receipt() == nil, "1.0.26: utan kvitto – ingen rad")
+  said = {}
+  ForeverScoutOpt.rcpt = nil
+  fire("PLAYER_LOGIN")
+  check(#said == 1 and said[1]:find("1.0.27", 1, true), "1.0.26: utan kvitto säger inloggningen bara att addonen är igång")
+
+  -- Ett kvitto som klienten har skrivit (exakt den text AddonReceipt.Render ger)
+  local text = "-- ForeverScout: receipt for the latest upload. Written by the Forever Scout client after each upload -\n"
+    .. "-- numbers only. Do not edit; the client replaces this file.\n"
+    .. "ForeverScoutReceipt = { v = 1, t = " .. (NOW - 185) .. ", finds = 12, shots = 1, pending = 40, pendingFinds = 3 }\n"
+  local fn = loadstring(text)
+  check(fn ~= nil, "1.0.26: klientens kvitto är giltig Lua")
+  fn()
+  local line, t = S.receipt()
+  check(t == NOW - 185 and line == "Last upload 3 min ago: 12 find(s) and 1 picture(s) received. 40 points are waiting for one more player to confirm (3 finds).",
+        "1.0.26: kvittots rad på engelska (" .. tostring(line) .. ")")
+  said = {}
+  fire("PLAYER_LOGIN")
+  check(#said == 2 and said[2]:find("Last upload 3 min ago", 1, true) and said[2]:find("ForeverScout", 1, true), "1.0.26: inloggningen säger kvittot efter raden om att addonen är igång")
+  check(ForeverScoutOpt.rcpt == NOW - 185, "1.0.26: det visade kvittot antecknas per karaktär (aldrig i den uppladdade filen)")
+  check(db.rcpt == nil and db.receipt == nil, "1.0.26: inget om kvittot sparas i ForeverScoutDB")
+  said = {}
+  fire("PLAYER_LOGIN")
+  check(#said == 1, "1.0.26: samma kvitto sägs inte en gång till efter /reload")
+  ForeverScoutReceipt.t = NOW - 30
+  said = {}
+  fire("PLAYER_LOGIN")
+  check(#said == 2 and said[2]:find("30 s ago", 1, true), "1.0.26: ett nytt kvitto sägs igen")
+
+  -- /scout visar alltid kvittot
+  said = {}
+  SlashCmdList.FOREVERSCOUT("")
+  local found = false
+  for _, m in ipairs(said) do if m:find("Last upload 30 s ago: 12 find(s) and 1 picture(s) received", 1, true) then found = true end end
+  check(found, "1.0.26: /scout visar kvittot")
+
+  -- Svenska, och utan poäng som väntar
+  ForeverScoutOpt.lang = "sv"
+  ForeverScoutReceipt = { v = 1, t = NOW - 7200, finds = 0, shots = 2 }
+  check(S.receipt() == "Senast skickat för 2 h sedan: 0 fynd och 2 bild(er) mottagna.", "1.0.26: kvittot på svenska utan väntande poäng (" .. tostring(S.receipt()) .. ")")
+  ForeverScoutReceipt = { v = 1, t = NOW - 7200, finds = 5, shots = 0, pending = 15 }
+  check(S.receipt() == "Senast skickat för 2 h sedan: 5 fynd och 0 bild(er) mottagna. 15 poäng väntar på att en spelare till bekräftar.", "1.0.26: väntande poäng utan antal fynd")
+  ForeverScoutReceipt = { v = 1, t = NOW - 7200, finds = 5, shots = 0, pending = 0, pendingFinds = 0 }
+  check(S.receipt() == "Senast skickat för 2 h sedan: 5 fynd och 0 bild(er) mottagna.", "1.0.26: noll väntande poäng nämns inte")
+  ForeverScoutOpt.lang = "en"
+
+  -- Allt som inte är klientens format ignoreras – aldrig ett fel
+  for name, bad in pairs({
+    ["sträng"] = "x", ["tal"] = 5, ["tom tabell"] = {}, ["annan formatversion"] = { v = 2, t = NOW, finds = 1, shots = 1 },
+    ["tid som text"] = { v = 1, t = tostring(NOW), finds = 1, shots = 1 }, ["tid 0"] = { v = 1, t = 0, finds = 1, shots = 1 },
+    ["negativt antal"] = { v = 1, t = NOW, finds = -1, shots = 1 }, ["decimaltal"] = { v = 1, t = NOW, finds = 1.5, shots = 1 },
+    ["antal som text"] = { v = 1, t = NOW, finds = "12", shots = 1 }, ["bilder saknas"] = { v = 1, t = NOW, finds = 1 },
+    ["text i stället för tal"] = { v = 1, t = NOW, finds = "|cffff0000x|r", shots = "y" },
+    ["äldre än 30 dagar"] = { v = 1, t = NOW - 31 * 86400, finds = 1, shots = 1 },
+  }) do
+    ForeverScoutReceipt = bad
+    local ok, res = pcall(S.receipt)
+    check(ok and res == nil, "1.0.26: ogiltigt kvitto ignoreras (" .. name .. ")")
+  end
+  ForeverScoutReceipt = { v = 1, t = NOW + 3600, finds = 1, shots = 1 }
+  check(S.receipt() == "Last upload 0 s ago: 1 find(s) and 1 picture(s) received.", "1.0.26: en tid i framtiden (klockan har ändrats) visas som nyss")
+  ForeverScoutReceipt = { v = 1, t = NOW, finds = 1, shots = 1, pending = "40", pendingFinds = {} }
+  check(S.receipt() == "Last upload 0 s ago: 1 find(s) and 1 picture(s) received.", "1.0.26: väntande poäng som inte är tal nämns inte")
+  for _, lang in ipairs({ "en", "sv" }) do
+    local L = ns.texts[lang]
+    check(type(L.receipt) == "string" and type(L.receipt_pending) == "string" and type(L.receipt_pending_pts) == "string", "1.0.26: kvittots texter finns (" .. lang .. ")")
+  end
+  check(S.errors == errors0, "1.0.26 utan fångade fel (" .. tostring(S.lastError) .. ")")
+
+  ForeverScoutReceipt, ForeverScoutOpt.rcpt, ForeverScoutOpt.lang = nil, nil, nil
+  DEFAULT_CHAT_FRAME.AddMessage, C_Timer.After = oldAdd, oldTimer
 end
 
 print(string.format("ForeverScout mock: %d ok, %d fel", passes, fails))

@@ -177,6 +177,8 @@ internal static class Links
     public static string Privacy(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/integritet" : "/en/contribute/privacy").ToString();
     public static string Report(ApiClient api) => Contribute(api) + "#rapportera-fel";
     public static string Download(ApiClient api) => api.Site(Strings.IsSv ? "/bidra/ladda-ner" : "/en/contribute/download").ToString();
+    /// <summary>1.0.18: "Mina bilder" – spelarens Scout-bilder på sajten.</summary>
+    public static string Pictures(ApiClient api) => api.Site(Overview.PicturesPath(Strings.IsSv)).ToString();
 
     /// <summary>Öppnar bara http(s)-länkar mot sajtens värd.</summary>
     public static void Open(ApiClient api, string url)

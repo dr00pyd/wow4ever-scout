@@ -3,6 +3,9 @@
 public sealed class SyncReport
 {
     public int FilesUploaded { get; set; }
+    /// <summary>1.0.18: poster som servern tog emot ur de uppladdade filerna (summan av svarets "accepted") – till
+    /// kvittot i spelet (<see cref="AddonReceipt"/>).</summary>
+    public int RecordsAccepted { get; set; }
     public int FilesUnchanged { get; set; }
     /// <summary>Filer som inte skickades eftersom addonversionen i dem är spärrad.</summary>
     public int FilesBlocked { get; set; }
@@ -142,6 +145,9 @@ public sealed class Uploader(ApiClient api, Settings settings)
                 UploadLog.Append("ladda-upp", bytes.Length, sha,
                     $"ok lastSeq={res.LastSeq} newConfirmed={res.NewConfirmed?.Count ?? 0} points={res.Points}");
                 report.FilesUploaded++;
+                report.RecordsAccepted = Overview.Clamp((long)report.RecordsAccepted + (res.Accepted?.Values.Sum(v => (long)Math.Max(0, v)) ?? 0));
+                // 1.0.18: en uppladdning från den nya addonversionen = spelet har laddat den, påminnelsen om /reload tas bort.
+                ReloadReminder.OnUploaded(settings, addonVersion);
                 settings.UploadedSha[key] = sha;
                 if (res.LastSeq is long seq) settings.UploadedSeq[key] = seq;
                 else if (maxSeq is long local) settings.UploadedSeq[key] = local;

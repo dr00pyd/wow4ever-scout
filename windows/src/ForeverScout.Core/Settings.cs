@@ -106,6 +106,29 @@ public sealed class Settings
     public int? AcceptedTotal { get; set; }
     public int? ConfirmedTotal { get; set; }
     public List<ConfirmedItem> LastConfirmed { get; set; } = new();
+    /// <summary>1.0.18, från /api/bidrag/jag (valfria fält): poäng och fynd som väntar på att en spelare till bekräftar.
+    /// Null tills servern skickar dem – då visas ingenting.</summary>
+    public int? PendingPoints { get; set; }
+    public int? PendingFinds { get; set; }
+    /// <summary>1.0.18, från /api/bidrag/jag (valfritt fält "media"): spelarens Scout-bilder – publicerade, väntar på
+    /// granskning och avvisade. Null tills servern skickar fältet; då visas bara antalet bilder appen själv har skickat.</summary>
+    public int? MediaPublished { get; set; }
+    public int? MediaPending { get; set; }
+    public int? MediaRejected { get; set; }
+    /// <summary>1.0.18: addonversionen som klienten bytte till medan en äldre fanns på plats – spelet laddar den först
+    /// efter /reload eller omstart (<see cref="ReloadReminder"/>). Null = ingen påminnelse.</summary>
+    public string? AddonReloadVersion { get; set; }
+    /// <summary>1.0.18: när addonfilerna byttes (se <see cref="AddonReloadVersion"/>).</summary>
+    public DateTime? AddonReloadSinceUtc { get; set; }
+    /// <summary>1.0.18: från den här tidpunkten räknas spelets sparningar i <see cref="SilentSession"/> (sätts första
+    /// gången funktionen körs och när spelkatalogen byts) – äldre sparningar ger aldrig någon varning.</summary>
+    public DateTime? SilentSinceUtc { get; set; }
+    /// <summary>1.0.18: spelkatalogen som <see cref="SilentSinceUtc"/> gäller (byts katalogen börjar räkningen om).</summary>
+    public string? SilentDir { get; set; }
+    /// <summary>1.0.18: när varningen "spelet sparade men addonen sparade inget" senast visades (högst en per spelsession).</summary>
+    public DateTime? SilentWarnedUtc { get; set; }
+    /// <summary>1.0.18: sparningen (SavedVariables-mappens ändringstid) som den senaste varningen gällde.</summary>
+    public DateTime? SilentSaveUtc { get; set; }
     /// <summary>L10: högsta signerade "issued" i en godtagen versionsinfo. Äldre versionsinfo avvisas (ingen återuppspelning).</summary>
     public string? ReleaseIssued { get; set; }
     /// <summary>1.0.13: beta-kanalen ("Betaversioner" i Inställningar) – appen och addonen hämtas från
@@ -113,6 +136,22 @@ public sealed class Settings
     public bool Beta { get; set; }
     /// <summary>1.0.13: som <see cref="ReleaseIssued"/>, men för beta-kanalen (egen signerad fil, egen tidsstämpel).</summary>
     public string? ReleaseIssuedBeta { get; set; }
+
+    /// <summary>1.0.18: versionsinfon har haft <c>signatureAll</c> – därefter krävs den (<see cref="AcceptRelease"/>).</summary>
+    public bool ReleaseSignedAll { get; set; }
+    public bool ReleaseSignedAllBeta { get; set; }
+
+    /// <summary>1.0.18: reservnyckeln har återkallat huvudnyckeln – bara reservnyckeln godtas därefter (<see cref="AcceptRelease(SignedRelease, bool)"/>).</summary>
+    /// Sparas som den återkallade nyckelns FINGERAVTRYCK, inte som ja/nej: ett senare klientsläpp med en ny
+    /// huvudnyckel ska inte ärva återkallelsen av den gamla.
+    public string? RevokedKey { get; set; }
+
+    /// <summary>Är den här klientens inbyggda huvudnyckel återkallad?</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool PrimaryKeyRevoked => RevokedKey != null && string.Equals(RevokedKey, UpdateKeys.PrimaryFingerprint, StringComparison.Ordinal);
+
+    /// <summary>1.0.18: det besked från guiden (<see cref="SignedRelease.Notice"/>) som senast visats – visas en gång.</summary>
+    public string? NoticeSeen { get; set; }
     /// <summary>
     /// L11: den spelkatalog som användaren valt eller bekräftat. En automatiskt hittad katalog används först när den
     /// bekräftats (en gång). Null i inställningar från ≤ 1.0.6 – då frågar 1.0.7 en gång.
@@ -135,14 +174,65 @@ public sealed class Settings
     }
 
     /// <summary>
+    /// 1.0.18: beskedet från guiden om det är nytt (visas en gång per text), annars null. Tas beskedet bort ur
+    /// versionsinfon glöms det, så att samma text kan visas igen om den kommer tillbaka. Sparar själv.
+    /// </summary>
+    public string? TakeNotice(SignedRelease release, bool swedish)
+    {
+        var note = release.NoticeFor(swedish);
+        if (string.Equals(note, NoticeSeen, StringComparison.Ordinal)) return null;
+        NoticeSeen = note;
+        Save();
+        return note;
+    }
+
+    /// <summary>
     /// L10: godkänner en (signaturkontrollerad) versionsinfo bara om dess "issued" inte är äldre än den senaste vi sett,
     /// och sparar det nya högsta värdet. Kastar <see cref="ApiException"/> (release-stale) annars.
     /// </summary>
-    public SignedRelease AcceptRelease(SignedRelease release, bool beta = false)
+    public SignedRelease AcceptRelease(SignedRelease release, bool beta = false) =>
+        AcceptRelease(release, beta, UpdateKeys.PrimaryFingerprint, UpdateKeys.BackupFingerprint);
+
+    /// <summary>
+    /// De nycklar som versionsinfon och filerna ska verifieras mot: huvudnyckeln och reservnyckeln, eller bara
+    /// reservnyckeln när den har återkallat huvudnyckeln (<see cref="PrimaryKeyRevoked"/>).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string TrustedKeys => UpdateKeys.Trusted(PrimaryKeyRevoked);
+
+    /// <summary>Som <see cref="AcceptRelease(SignedRelease, bool)"/> med nycklarnas fingeravtryck angivna (tester).</summary>
+    internal SignedRelease AcceptRelease(SignedRelease release, bool beta, string primary, string? backup)
     {
+        // Huvudnyckeln är återkallad: en versionsinfo som den signerat godtas aldrig mer (anroparna verifierar då
+        // redan bara mot reservnyckeln – det här är samma regel en gång till).
+        bool revoked = RevokedKey != null && string.Equals(RevokedKey, primary, StringComparison.Ordinal);
+        if (revoked && string.Equals(release.Signer, primary, StringComparison.Ordinal)) throw new ApiException(ErrorCodes.SignatureInvalid);
+        // Återkallelse: bara reservnyckeln kan återkalla, bara huvudnyckeln kan återkallas, och fältet ska vara
+        // signerat (signatureAll). Den prövas FÖRE "issued"-golvet: golvet kan vara satt av den läckta huvudnyckeln
+        // (en versionsinfo daterad långt fram i tiden), och då hade reservnyckelns återkallelse avvisats som för
+        // gammal för alltid. När återkallelsen sparas börjar därför båda kanalernas golv om från den här
+        // versionsinfon – det som sattes under den läckta nyckeln går inte att lita på. Gäller sedan för alltid.
+        if (!revoked && backup != null && release.SignedAll
+            && !string.Equals(primary, backup, StringComparison.Ordinal)
+            && string.Equals(release.Signer, backup, StringComparison.Ordinal)
+            && string.Equals(release.RevokedKey, primary, StringComparison.Ordinal)
+            && ReleaseVerifier.TryParseIssued(release.Issued, out _))
+        {
+            RevokedKey = primary;
+            ReleaseIssued = release.Issued;
+            ReleaseIssuedBeta = release.Issued;
+            if (beta) ReleaseSignedAllBeta = true; else ReleaseSignedAll = true;
+            Save();
+            return release;
+        }
+        // 1.0.18: har kanalen en gång haft signatureAll krävs den därefter – annars kunde någon plocka bort den och
+        // därmed de fält som bara den signerar (lägsta version, besked).
+        if ((beta ? ReleaseSignedAllBeta : ReleaseSignedAll) && !release.SignedAll) throw new ApiException(ErrorCodes.SignatureMissing);
         var seen = beta ? ReleaseIssuedBeta : ReleaseIssued;
         var highest = ReleaseVerifier.AcceptIssued(release.Issued, seen);
-        if (!string.Equals(highest, seen, StringComparison.Ordinal))
+        bool learned = release.SignedAll && !(beta ? ReleaseSignedAllBeta : ReleaseSignedAll);
+        if (learned) { if (beta) ReleaseSignedAllBeta = true; else ReleaseSignedAll = true; }
+        if (learned || !string.Equals(highest, seen, StringComparison.Ordinal))
         {
             if (beta) ReleaseIssuedBeta = highest; else ReleaseIssued = highest;
             Save();
@@ -180,7 +270,15 @@ public sealed class Settings
     {
         lock (_lock)
         {
-            SafeFs.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json));
+            // Uppladdningen ändrar listor på en annan tråd (UploadedSha, Shots): ändras en mitt i serialiseringen
+            // kastar den InvalidOperationException. Försök igen – nästa sparning tar ändå med allt.
+            string json;
+            for (int attempt = 0; ; attempt++)
+            {
+                try { json = JsonSerializer.Serialize(this, Json); break; }
+                catch (InvalidOperationException) when (attempt < 4) { Thread.Sleep(15); }
+            }
+            SafeFs.WriteAllText(FilePath, json);
         }
     }
 }

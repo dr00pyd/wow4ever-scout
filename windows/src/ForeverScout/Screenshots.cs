@@ -37,7 +37,7 @@ internal static class Screenshots
         app.UpdateStatus();
         app.ShowWindow();
         var main = app.Window!;
-        main.ClientSize = new Size(main.LogicalToDeviceUnits(940), main.LogicalToDeviceUnits(800));
+        main.ClientSize = new Size(main.LogicalToDeviceUnits(940), main.LogicalToDeviceUnits(852));
         await Task.Delay(800);
         MainForm.SaveImage(main, P("dashboard"));
 
@@ -66,7 +66,7 @@ internal static class Screenshots
 
         using (var dlg = new CloseDialog { StartPosition = FormStartPosition.Manual })
         {
-            main.ClientSize = new Size(main.LogicalToDeviceUnits(940), main.LogicalToDeviceUnits(800));
+            main.ClientSize = new Size(main.LogicalToDeviceUnits(940), main.LogicalToDeviceUnits(852));
             dlg.Show(main);
             dlg.Location = new Point(main.Left + (main.Width - dlg.Width) / 2, main.Top + (main.Height - dlg.Height) / 2);
             await Task.Delay(500);

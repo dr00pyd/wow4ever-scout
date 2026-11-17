@@ -27,6 +27,9 @@ internal sealed class ScoutController : IDisposable
     /// <summary>Fel att visa: uppladdningens, annars addonens (1.0.12, M5: addonens fel raderas inte av nästa synk).</summary>
     public string? ErrorText => Rules112.ShownError(_uploadError, _addonError);
     public bool HasSavedVariables { get; private set; }
+    /// <summary>1.0.18: beskedet överst i fönstret – påminnelsen om /reload eller varningen när spelet sparar utan att
+    /// addonen gör det (<see cref="GameWatch"/>). Null = inget.</summary>
+    public Notice? Notice { get; private set; }
     public IReadOnlyList<(DateTime At, string Text, Color Color)> Journal => _journal;
     public bool IsExiting { get; private set; }
 
@@ -139,6 +142,7 @@ internal sealed class ScoutController : IDisposable
         InstallBundledAddonIfNeeded();
         RefreshStats(force: true);
         UpdateStatus();
+        WatchGame();
         _tick.Start();
         await RefreshMe();
         await CheckUpdates(interactive: false);
@@ -254,9 +258,14 @@ internal sealed class ScoutController : IDisposable
             var bundled = AddonBundle.Version;
             if (!Settings.BlockedAddons.Contains(bundled ?? "") && AddonInstaller.NeedsInstall(dir, AddonBundle.Files))
             {
+                var previous = AddonInstaller.InstalledVersion(dir);
                 AddonInstaller.Install(dir, AddonBundle.Files);
-                Log(TF("journal.addon", bundled), Look.Ok);
-                _window?.Flash(TF("addon.installed", bundled), 8000);
+                // 1.0.18: byttes en redan installerad addon laddar spelet den nya först efter /reload – säg det.
+                if (!RemindReload(previous, bundled))
+                {
+                    Log(TF("journal.addon", bundled), Look.Ok);
+                    _window?.Flash(TF("addon.installed", bundled), 8000);
+                }
             }
         }
         catch (Exception ex) when (ex is ScoutException or IOException or UnauthorizedAccessException) { SetAddonError(Strings.Error(ex)); return; }
@@ -268,6 +277,40 @@ internal sealed class ScoutController : IDisposable
     {
         _addonError = text;
         UpdateStatus();
+    }
+
+    /// <summary>
+    /// 1.0.18: addonfilerna har bytts. Fanns en äldre addon på plats använder ett spel som kör just nu de gamla filerna
+    /// tills spelaren skriver /reload – en rad i lägerjournalen och ett besked överst i fönstret som ligger kvar tills
+    /// spelet har sparat eller en uppladdning kommer från den nya versionen (<see cref="ReloadReminder"/>).
+    /// </summary>
+    /// <returns>False om det var en första installation (då gäller det vanliga beskedet).</returns>
+    private bool RemindReload(string? previous, string? installed)
+    {
+        if (!ReloadReminder.OnInstalled(Settings, previous, installed, DateTime.UtcNow)) return false;
+        try { Settings.Save(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SafeFsException) { }
+        Log(TF("journal.reload", Strings.When(DateTime.UtcNow), installed), Look.Gold);
+        _window?.Flash(TF("reload.notice", installed), 8000);
+        WatchGame();
+        return true;
+    }
+
+    /// <summary>
+    /// 1.0.18: det appen ser av spelet genom filerna (var 15:e sekund och efter varje uppladdning): påminnelsen om
+    /// /reload tas bort när den inte längre gäller, och om spelet har sparat utan att addonen gjorde det visas en
+    /// varning – en gång per spelsession. Inga processer listas.
+    /// </summary>
+    private void WatchGame()
+    {
+        var r = GameWatch.Tick(CurrentDir, Settings, DateTime.UtcNow);
+        if (r.NewSilentWarning)
+        {
+            Log(TF("journal.silent", Strings.When(DateTime.UtcNow)), Look.Warn);
+            _window?.Flash(T("silent.title"), 8000);
+        }
+        if (Equals(Notice, r.Notice)) return;
+        Notice = r.Notice;
+        _window?.ShowNotice();
     }
 
     // ------------------------------------------------------------------ data
@@ -315,6 +358,7 @@ internal sealed class ScoutController : IDisposable
             if (me.Name is { Length: > 0 } n) Settings.ContributorName = n;
             Settings.AcceptedTotal = me.AcceptedTotal();
             Settings.ConfirmedTotal = me.Confirmed;
+            Overview.Apply(Settings, me); // 1.0.18: poäng som väntar på bekräftelse och spelarens bilder (valfria fält)
             if (me.Recent is { Count: > 0 } recent && Settings.LastConfirmed.Count == 0)
                 Settings.LastConfirmed = recent.Select(ToConfirmed).OfType<ConfirmedItem>().Take(5).ToList();
             Settings.Save();
@@ -394,6 +438,7 @@ internal sealed class ScoutController : IDisposable
     {
         RefreshStats(force: false);
         UpdateStatus();
+        WatchGame();
         if (_uploader.RetryDue && AutoUploadActive) _sync.Notify();
         if (DateTime.UtcNow - _meAt > MeEvery) _ = RefreshMe();
         if (DateTime.UtcNow - _versionAt > VersionEvery) _ = CheckUpdates(interactive: false);
@@ -435,7 +480,11 @@ internal sealed class ScoutController : IDisposable
         RefreshStats(force: true);
         _window?.ShowContribution();
         UpdateStatus();
-        if (report.FilesUploaded > 0) await RefreshMe();
+        if (report.FilesUploaded > 0 || report.ShotsUploaded > 0) await RefreshMe(); // 1.0.18: även efter bara bilder (bildraden)
+        // 1.0.18: kvittot i spelet – efter RefreshMe, så att poängen som väntar på bekräftelse är färska. Skrivs bara
+        // i addonens egen mapp i WoW-katalogen och innehåller bara tal (AddonReceipt).
+        AddonReceipt.AfterUpload(CurrentDir, Settings, report, DateTimeOffset.UtcNow);
+        WatchGame();
     }
 
     // ------------------------------------------------------------------ uppdateringar (signerade)
@@ -463,37 +512,93 @@ internal sealed class ScoutController : IDisposable
         finally { _checking = false; }
     }
 
+    private bool _requiredShown;
+
+    /// <summary>
+    /// 1.0.18: det som guiden säger i den signerade versionsinfon – ett kort besked (en gång per text) och att den här
+    /// versionen är äldre än den lägsta som får bidra (en gång per körning). Rader i lägerjournalen.
+    /// </summary>
+    private void Announce(SignedRelease release)
+    {
+        if (Settings.TakeNotice(release, Strings.IsSv) is { } note) Log(TF("notice.from", note), Look.Gold);
+        if (_requiredShown || !release.TooOld(SelfUpdater.CurrentVersion)) return;
+        _requiredShown = true;
+        Log(TF("update.required", release.MinClient, SelfUpdater.CurrentVersion.ToString(3)), Look.Warn);
+    }
+
     private async Task CheckUpdatesCore(bool interactive)
     {
         try
         {
             // L10: signature2 krävs (ReleaseVerifier) och "issued" får inte vara äldre än den senaste vi sett.
-            var release = Settings.AcceptRelease(await Api.VersionAsync(UpdateKeys.PublicKeyPem, Settings.Beta), Settings.Beta);
+            var release = Settings.AcceptRelease(await Api.VersionAsync(Settings.TrustedKeys, Settings.Beta), Settings.Beta);
             Settings.BlockedAddons = release.BlockedAddons.ToList();
             Settings.Save();
+            Announce(release);
             await UpdateAddon(release, interactive, announceBlocked: false, alsoBlocked: null);
             _sync.Notify();
 
 #if LINUX
-            // Linux: appen byter inte ut sig själv än. Finns en nyare signerad version (linux-fälten, signature5)
-            // säger appen till och länkar till nedladdningssidan. Addonen ovan uppdateras automatiskt som vanligt.
+            // Linux: linux-fälten verifierade med signature5, AppImage-filen mot vår filsignatur (samma nyckel som
+            // Windows och macOS). 1.0.18: filen byts automatiskt (AppImageUpdater) när appen körs som AppImage och
+            // filen går att byta. Annars säger appen till och länkar till nedladdningssidan, som före 1.0.18.
+            // Addonen ovan uppdateras automatiskt som vanligt.
             SignedRelease lin;
-            try { lin = Settings.AcceptRelease(await Api.LinuxVersionAsync(UpdateKeys.PublicKeyPem, Settings.Beta), Settings.Beta); }
+            try { lin = await Api.LinuxVersionAsync(Settings.TrustedKeys, Settings.Beta); }
             catch (ApiException ex) when (ex.Code == ErrorCodes.SignatureMissing) { lin = new SignedRelease(); } // inget Linux-släpp än
-            if (lin.LinuxFile is null || !SelfUpdater.IsNewer(lin.Linux))
+            // Utanför try: ett nej från AcceptRelease (äldre "issued", bortplockad signatureAll) är ett fel, inte "inget släpp".
+            if (lin.Issued != null) Settings.AcceptRelease(lin, Settings.Beta);
+            var newVersion = lin.Linux;
+            if (lin.LinuxFile is null || !SelfUpdater.IsNewer(newVersion))
             {
                 if (interactive) await Dialogs.Info(_window, TF("update.none", SelfUpdater.CurrentVersion.ToString(3)));
                 return;
             }
-            if (interactive)
+            if (!interactive && Uploading)
             {
-                if (await Dialogs.YesNo(_window, TF("update.manual", lin.Linux))) Links.Open(Api, Links.Download(Api));
+                _versionAt = DateTime.UtcNow - VersionEvery + TimeSpan.FromMinutes(1); // försök igen om en minut
+                return;
             }
-            else if (_offered != lin.Linux) { _offered = lin.Linux; Log(TF("update.manual.log", lin.Linux), Look.Warn); }
+            // Går filen inte att byta (ingen AppImage, skrivskyddad mapp) eller har bytet misslyckats flera gånger:
+            // beskedet från före 1.0.18.
+            bool canSwap = await Task.Run(AppImageUpdater.CanUpdate);
+            if (!canSwap || (!interactive && Settings.UpdateFailures >= AutoUpdateMaxFailures))
+            {
+                if (interactive)
+                {
+                    if (await Dialogs.YesNo(_window, TF("update.manual", newVersion))) Links.Open(Api, Links.Download(Api));
+                }
+                else if (_offered != newVersion) { _offered = newVersion; Log(TF("update.manual.log", newVersion), Look.Warn); }
+                return;
+            }
+            if (!interactive) Log(TF("journal.autoupdate", Strings.When(DateTime.UtcNow), newVersion), Look.Gold);
+            byte[] image;
+            try { image = await Api.DownloadReleaseFileAsync(lin, ReleaseKind.Linux, Settings.TrustedKeys, 600L * 1024 * 1024); }
+            catch (Exception ex) when (ex is ScoutException or IOException or UnauthorizedAccessException) { throw new UpdateStepException(UpdateSteps.Download, ex, null); }
+            await Task.Run(() => AppImageUpdater.Stage(image));
+            if (!interactive || await Dialogs.YesNo(_window, TF("update.ready", newVersion)))
+            {
+                Settings.JustUpdatedFrom = SelfUpdater.CurrentVersion.ToString(3);
+                // Fönstret visas efter omstarten bara om det var öppet eller om användaren själv bad om uppdateringen.
+                Settings.QuietUpdate = !interactive && _window is not { IsVisible: true };
+                Settings.Save();
+                var staged = ApiClient.Sha256Hex(image); // de signerade byten: filen på disk ska vara exakt de
+                try { await Task.Run(() => AppImageUpdater.Swap(staged)); }
+                catch (UpdateStepException) { Settings.JustUpdatedFrom = null; Settings.QuietUpdate = false; Settings.Save(); throw; }
+                UploadLog.Append("update", image.Length, ApiClient.Sha256Hex(image), $"ok swapped to {newVersion}");
+                Settings.UpdateFailures = 0;
+                Settings.Save();
+                if (!await StartNewInstanceVerifiedAsync())
+                    throw new UpdateStepException(UpdateSteps.Restart, new InvalidOperationException("new process did not start"), "ForeverScout");
+                Exit();
+            }
+            else AppImageUpdater.Cleanup();
 #else
             SignedRelease mac;
-            try { mac = Settings.AcceptRelease(await Api.MacVersionAsync(UpdateKeys.PublicKeyPem, Settings.Beta), Settings.Beta); }
+            try { mac = await Api.MacVersionAsync(Settings.TrustedKeys, Settings.Beta); }
             catch (ApiException ex) when (ex.Code == ErrorCodes.SignatureMissing) { mac = new SignedRelease(); } // inget Mac-släpp än
+            // Utanför try: ett nej från AcceptRelease (äldre "issued", bortplockad signatureAll) är ett fel, inte "inget släpp".
+            if (mac.Issued != null) Settings.AcceptRelease(mac, Settings.Beta);
             var newVersion = mac.Mac;
             if (mac.MacFile is null || !SelfUpdater.IsNewer(newVersion))
             {
@@ -514,7 +619,7 @@ internal sealed class ScoutController : IDisposable
             if (!interactive) Log(TF("journal.autoupdate", Strings.When(DateTime.UtcNow), newVersion), Look.Gold);
             if (MacBundleUpdater.IsTranslocated(MacBundleUpdater.Bundle)) throw new ScoutException(ErrorCodes.AppTranslocated);
             byte[] zip;
-            try { zip = await Api.DownloadReleaseFileAsync(mac, ReleaseKind.Mac, UpdateKeys.PublicKeyPem, 600L * 1024 * 1024); }
+            try { zip = await Api.DownloadReleaseFileAsync(mac, ReleaseKind.Mac, Settings.TrustedKeys, 600L * 1024 * 1024); }
             catch (Exception ex) when (ex is ScoutException or IOException or UnauthorizedAccessException) { throw new UpdateStepException(UpdateSteps.Download, ex, null); }
             var staged = await Task.Run(() => MacBundleUpdater.Stage(zip));
             if (!interactive || await Dialogs.YesNo(_window, TF("update.ready", newVersion)))
@@ -571,7 +676,7 @@ internal sealed class ScoutController : IDisposable
         {
             // Spärrar som uppladdningen just lärt sig (422) gäller tills nästa versionskontroll.
             var learned = Settings.BlockedAddons.ToList();
-            var release = Settings.AcceptRelease(await Api.VersionAsync(UpdateKeys.PublicKeyPem, Settings.Beta), Settings.Beta);
+            var release = Settings.AcceptRelease(await Api.VersionAsync(Settings.TrustedKeys, Settings.Beta), Settings.Beta);
             Settings.BlockedAddons = release.BlockedAddons.Union(learned).ToList();
             Settings.Save();
             await UpdateAddon(release, interactive: false, announceBlocked: true, alsoBlocked: learned);
@@ -598,13 +703,15 @@ internal sealed class ScoutController : IDisposable
                 if (interactive) await Dialogs.Info(_window, wait);
                 return;
         }
-        var zip = await Api.DownloadReleaseFileAsync(release, ReleaseKind.Addon, UpdateKeys.PublicKeyPem, 20 * 1024 * 1024);
+        var zip = await Api.DownloadReleaseFileAsync(release, ReleaseKind.Addon, Settings.TrustedKeys, 20 * 1024 * 1024);
         AddonInstaller.Install(dir, AddonInstaller.FromZip(zip));
         _uploadError = null;
         _addonError = null;
         var msg = announceBlocked ? TF("addon.blocked", release.Addon) : TF("update.addon", release.Addon);
-        if (interactive) await Dialogs.Info(_window, msg);
-        else Log(msg, Look.Ok);
+        // 1.0.18: fanns en äldre addon på plats: påminnelsen om /reload (lägerjournalen och beskedet överst i fönstret).
+        bool reminded = RemindReload(installed, release.Addon);
+        if (interactive) await Dialogs.Info(_window, reminded ? msg + "\n\n" + TF("reload.notice", release.Addon) + "\n" + T("reload.notice.body") : msg);
+        else if (!reminded || announceBlocked) Log(msg, Look.Ok);
         _window?.ShowStatus();
     }
 
@@ -612,7 +719,13 @@ internal sealed class ScoutController : IDisposable
     private static async Task<bool> StartNewInstanceVerifiedAsync()
     {
         Process? p;
-        try { p = Process.Start(new ProcessStartInfo(MacBundleUpdater.ExecutableIn(MacBundleUpdater.Bundle)) { UseShellExecute = false, Arguments = "--restarted" }); }
+#if LINUX
+        // 1.0.18: efter bytet är $APPIMAGE den nya filen (samma sökväg) – den startas, inte binären i den gamla monteringen.
+        var exe = AppImageUpdater.Target ?? throw new ScoutException(ErrorCodes.ExePath);
+#else
+        var exe = MacBundleUpdater.ExecutableIn(MacBundleUpdater.Bundle);
+#endif
+        try { p = Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, Arguments = "--restarted" }); }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or ScoutException) { return false; }
         if (p is null) return false;
         using (p)

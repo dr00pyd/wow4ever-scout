@@ -1,0 +1,4 @@
+-- ForeverScout: receipt for the latest upload (1.0.26). The Forever Scout client replaces this file after each
+-- upload with a table of numbers only (ForeverScoutReceipt = { v, t, finds, shots, pending, pendingFinds }), and the
+-- addon then says "Last upload ..." at the next login. This is the empty default that ships with the addon:
+-- nothing has been sent yet. Do not edit.

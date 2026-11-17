@@ -61,7 +61,7 @@ public static class ErrorCodes
     public static readonly string[] Server =
     [
         "origin", "rate-limited", "too-large", "invalid", "name-length", "name-chars", "name-reserved", "name-taken",
-        "unauthorized", "bad-code", "bad-file", "addon-blocked", "not-dbcache", "unavailable", "server",
+        "unauthorized", "bad-code", "bad-file", "addon-blocked", "not-dbcache", "unavailable", "server", "client-too-old",
     ];
 }
 

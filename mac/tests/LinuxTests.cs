@@ -141,6 +141,9 @@ public sealed class LinuxFileSystemTests : IDisposable
 
     public void Dispose()
     {
+        // Tillbaka till testernas gemensamma katalog – annars pekar SafeFs på en raderad katalog i alla senare tester
+        // (gav slumpvisa fel på riktig Linux, 2026-11-16).
+        if (OperatingSystem.IsLinux()) SafeFs.UseAppDataDir(global::ForeverScout.Tests.TestEnv.AppData);
         try { if (Directory.Exists(_dir)) Directory.Delete(_dir, recursive: true); } catch (IOException) { }
     }
 

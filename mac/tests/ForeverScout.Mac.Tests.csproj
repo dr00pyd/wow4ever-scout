@@ -48,6 +48,13 @@
     <Compile Include="..\..\windows\tests\Release112Tests.cs" Link="Shared\Release112Tests.cs" />
     <!-- 1.0.14: varelsecachen (Cache/WDB/<locale>/creaturecache.wdb) – samma regler på macOS/Linux. -->
     <Compile Include="..\..\windows\tests\CreatureCacheTests.cs" Link="Shared\CreatureCacheTests.cs" />
+    <!-- 1.0.18: bildraden, påminnelsen om /reload, kvittot i spelet, varningen när inget skickas, AppImage-bytet och
+         beta-kanalen – allt i Core, samma tester för macOS/Linux. -->
+    <Compile Include="..\..\windows\tests\Release118Tests.cs" Link="Shared\Release118Tests.cs" />
+    <!-- 1.0.18: signatureAll (signerad fältlista), lägsta klientversion och besked – samma kontroll på alla plattformar. -->
+    <Compile Include="..\..\windows\tests\SignedAllTests.cs" Link="Shared\SignedAllTests.cs" />
+    <!-- 1.0.18: reservnyckeln (två nycklar, fingeravtryck, återkallelse av huvudnyckeln) – samma kontroll på alla plattformar. -->
+    <Compile Include="..\..\windows\tests\ReserveKeyTests.cs" Link="Shared\ReserveKeyTests.cs" />
   </ItemGroup>
 
 </Project>

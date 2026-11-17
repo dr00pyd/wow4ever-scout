@@ -3,7 +3,7 @@
 ForeverScout samlar in data om WoW: Forever-världen medan du spelar: var NPC:er står, vad tränare lär ut, vad försäljare säljer, quests, malmådror och örter, loot och flygpunkter. Datan laddas upp till [guide.wow4ever.se](https://guide.wow4ever.se/bidra) och visas i Forever-guiden. När minst två spelare har rapporterat samma sak räknas den som bekräftad.
 
 - Spel: WoW: Forever (klient 1.60.x, `## Interface: 16001`)
-- Version: 1.0.20
+- Version: 1.0.26
 - Filformat: `docs/briefs/SCOUT-KONTRAKT.md` §1 (`ForeverScoutDB`, `v = 1`)
 
 ## Installation
@@ -31,11 +31,27 @@ Mappen innehåller två TOC-filer. Forever läser `ForeverScout_Forever.toc` och
 | `/scout sync` | Sparar nu (laddar om gränssnittet med /reload) så att klienten laddar upp direkt |
 | `/scout tipsa` / `/scout share` (`grupp` / `guild`) | Från 1.0.12: skriver **en** rad om Forever Scout i gruppens chatt (instansgrupp, raid eller party), annars i guildens. `tipsa` skriver på svenska med länken guide.wow4ever.se/scout, `share` på engelska med guide.wow4ever.se/en/scout, oavsett addonens språk. Bara när du själv skriver kommandot, högst en gång per minut |
 | `/scout bild` / `/scout shot` | Från 1.0.20 (beta): tar en skärmbild av ditt mål om det är en NPC, annars NPC:n under muspekaren, annars objektet under muspekaren. Gränssnittet göms medan bilden tas och visas igen direkt efteråt (senast efter 2 sekunder). Bilden antecknas i filen (`shots`) så att Forever Scout-klienten kan ladda upp just den bilden till rätt sida. Spelare och husdjur vägras. Finns också som tangent: Tangentbindningar → AddOns → Forever Scout → "Ta bild av målet" |
-| `/scout tips` (`on` / `off`) | Från 1.0.25: slår av eller på raden "Guiden saknar bild – /scout bild (+5 p)" i spelets tooltip (på som standard, per karaktär). Raden visas på NPC:er som guiden ännu inte har någon bild av (listan `ShotList.lua` följer med addonen och byggs med `scripts/build-addon-shotlist.mjs` vid släpp) och som du inte redan har fotat. Aldrig i strid, aldrig på spelare eller husdjur |
+| `/scout tips` (`on` / `off`) | Från 1.0.25: slår av eller på raden "Guiden saknar bild – /scout bild (+5 p)" i spelets tooltip (på som standard, per karaktär). Raden visas på NPC:er som guiden ännu inte har någon bild av (listan `ShotList.lua` följer med addonen och byggs med `scripts/build-addon-shotlist.mjs` vid släpp) och som du inte redan har fotat. Aldrig i strid, aldrig på spelare eller husdjur. Från 1.0.27: listan byggs vid varje addonsläpp ur guidens databas och räknar även bilder som väntar på granskning; är listan äldre än en vecka står det "Guiden saknar kanske bild"; laddades listan inte (en ny fil efter `/reload` – spelet läser nya filer först vid omstart) visas ingen rad alls, och addonen säger en gång att spelet ska startas om |
 | `/scout debug` | Visar antal fel som har fångats under sessionen (för felrapporter) |
 | `/scout test` | Diagnostik: vad spelet låter addonen läsa om målet just nu, och (från 1.0.11) antal karaktärer i `chars`, antal klarade quests och yrken för den här karaktären samt vilka quest- och yrkes-API:er klienten har. Inga namn och inget id skrivs ut |
 
-Addonen skriver inget i chatten om du inte själv skriver ett kommando, och skriver aldrig i andras chatt utom med `/scout tipsa`. Fel fångas och visas aldrig som felrutor.
+Addonen skriver inget i chatten om du inte själv skriver ett kommando – utom vid inloggning och `/reload`: en rad om att den är igång och (från 1.0.26) en rad med kvittot på den senaste uppladdningen. Den skriver aldrig i andras chatt utom med `/scout tipsa`. Fel fångas och visas aldrig som felrutor.
+
+## Kvittot (1.0.26)
+
+Addonen kan bara läsa filer som spelet laddar vid inloggning och `/reload`. Därför skriver Forever Scout-klienten (från 1.0.18) efter varje lyckad uppladdning en liten fil i addonens egen mapp, `Receipt.lua`, som står i båda `.toc`-filerna före `ForeverScout.lua`:
+
+```lua
+ForeverScoutReceipt = { v = 1, t = 1794503193, finds = 12, shots = 1, pending = 40, pendingFinds = 3 }
+-- v = formatversion, t = unixtid när uppladdningen blev klar, finds = poster och shots = bilder som servern tog emot,
+-- pending/pendingFinds = poäng och fynd som väntar på att en spelare till bekräftar (utelämnas om servern inte skickar dem)
+```
+
+- Vid inloggning säger addonen en rad: "Senast skickat för 3 min sedan: 12 fynd och 1 bild(er) mottagna. 40 poäng väntar på att en spelare till bekräftar (3 fynd)." Samma kvitto sägs bara en gång per karaktär (`ForeverScoutOpt.rcpt`, sparas per karaktär och laddas aldrig upp); `/scout` visar det alltid.
+- Kvittot gäller alltid uppladdningen **före** den här inloggningen – filen läses när gränssnittet laddas, och klienten skriver den först när den nya uppladdningen är klar.
+- Filen innehåller bara heltal som klienten själv skriver. Addonen kontrollerar ändå varje värde (tal, heltal, inte negativt) och ignorerar allt annat, liksom ett kvitto som är äldre än 30 dagar eller har en annan formatversion.
+- Mappen levereras med en tom standardfil (bara kommentarer), så att spelet inte klagar på att filen saknas. Den **ska följa med i addon-zip:en**. Klienten behåller ett befintligt kvitto när addonen uppdateras.
+- Uppdateras addonen från 1.0.25 medan spelet är igång räcker `/reload` troligen inte för den nya filen (WoW letar som regel upp nya filer först vid start – inte provat i Forever): addonen fungerar ändå, men kvittot visas då först efter att spelet startats om.
 
 ## Vad som sparas
 
@@ -54,7 +70,7 @@ Positioner sparas som kart-id (UiMapID) plus x/y i procent och tas när ett fön
 | Mobs (från 1.0.4) | NPC:er du bara tittar på (mål eller muspekare, utanför strid): creature-id, namn, nivåintervall, reaktion mot dig, din fraktion, klassificering (normal, elit, sällsynt, sällsynt elit, världsboss) och varelsetyp (som tal). **Ungefärligt område** = *din* position när du såg den, aldrig mobens. Ett nytt område sparas bara om det ligger mer än 5 kart-% från ett sparat område på samma karta, högst 8 per mob, och tiden avrundas till dagen. Högst 3 000 mobs. Från 1.0.5 även **exakta platser** (`e`) när du står inom ~10 yards (interaktionsavstånd) från en mob som ingen annan taggat, utanför strid (högst 8 per mob, dagen utan klockslag), och max-HP/mana per nivå |
 | Brevlådor (från 1.0.4) | position när du öppnar en brevlåda (och objektets id om spelet ger det). Högst 300, en per brevlåda |
 | Roller (från 1.0.4) | auktionsförrättare, stallmästare och andeläkare läggs till som roller på NPC:n när du öppnar deras fönster. Från 1.0.5 även värdshusvärd (när du binder hemsten), stridsmästare, talangåterställning och vapenrocksförsäljare |
-| Bilder (från 1.0.20) | `shots`: en rad per bild du tagit med `/scout bild` – `k` (`npc` eller `object`), `id` (creature- eller gameobject-id; saknas för objekt när spelet inte ger id:t), `n` (NPC:ns eller objektets namn), `t` (unixtid när spelet sparade bilden), din position `m`/`x`/`y` (ingen i instanser) och `c` (en slumpkod på 8 tecken som klienten och servern parar ihop bilden med). Högst 100, äldsta först bort; töms inte av `/scout reset`. Själva bilden ligger i spelets `Screenshots`-mapp – addonen läser den aldrig. Skärmbilder du tar själv (Print Screen) antecknas aldrig |
+| Bilder (från 1.0.20) | `shots`: en rad per bild du tagit med `/scout bild` – `k` (`npc` eller `object`), `id` (creature- eller gameobject-id; saknas för objekt när spelet inte ger id:t), `n` (NPC:ns eller objektets namn), `t` (unixtid när spelet sparade bilden), din position `m`/`x`/`y` (ingen i instanser) och `c` (en slumpkod på 8 tecken som klienten och servern parar ihop bilden med). Högst 100, äldsta först bort; töms inte av `/scout reset`. Från 1.0.27 även `shotIds`: id:n på alla NPC:er du har fotat (en sträng `"12,34"`, högst 5 000, äldsta först bort), så att bildraden i tooltipen inte kommer tillbaka när en bild har fallit ur `shots`. Klienten och servern läser inte fältet. Själva bilden ligger i spelets `Screenshots`-mapp – addonen läser den aldrig. Skärmbilder du tar själv (Print Screen) antecknas aldrig |
 | Huvud | formatversion, addonversion, spelets build, spelets språk, ett slumpat installations-id och `seq` (en räknare som ökar för varje ny post, så att klienten vet vad som redan är uppladdat) |
 
 ### chars (1.0.11): din egen karaktärs framsteg

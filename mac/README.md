@@ -157,6 +157,15 @@ Gäller också Linux (samma källfiler). Versionerna 1.0.15 och 1.0.16 släpptes
   döper filen `WoWScrnShot_MMDDYY_HHMMSS.jpg` och lägger den i `_forever_/Screenshots` (annars hittas den inte –
   posten ges då upp efter 24 timmar utan att något annat läses).
 
+### 1.0.18 (samma som Windows 1.0.18)
+Se "1.0.18" i `client/windows/README.md` – logiken ligger i `ForeverScout.Core` och fönstret (`MainWindow.cs`) visar
+den: bildraden med länken **Mina bilder** under översiktskorten, poäng som väntar på bekräftelse i "Mitt bidrag",
+beskedet överst (påminnelsen om `/reload`, varningen när spelet sparar utan att addonen gör det) och kvittot i spelet
+(`Receipt.lua` i addonens mapp i WoW-katalogen). macOS har inga bubblor: beskeden står i lägerjournalen, i statusraden
+en stund och överst i fönstret. Beta-kanalen ("Betaversioner" i Inställningar) fanns redan i Mac-appen (mac-fälten
+hämtas från `/api/bidrag/version?kanal=beta`); släpp med `scout-sign.mjs --channel beta --mac <zip> --mac-version <v>`.
+**Inte byggt eller provkört på en Mac** – bara kompilerat och testat på Windows (`dotnet test client/mac/tests`).
+
 ## Uppdateringar
 `public/scout/version.json` får fyra nya fält och en tredje signatur. Windows påverkas inte:
 - `mac`, `macFile` (`ForeverScout-mac.zip`), `macSha256`, `macSig` – zip:en med det **färdiga** paketet: kodsignerat

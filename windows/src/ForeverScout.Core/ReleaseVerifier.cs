@@ -36,6 +36,25 @@ public sealed class SignedRelease
     /// för att stoppa uppladdningen och tala om det för användaren, aldrig för att godta något eller för att
     /// installera en äldre addon (L10, se <see cref="AddonInstaller.Decide"/>).</summary>
     public IReadOnlyList<string> BlockedAddons { get; init; } = [];
+    /// <summary>1.0.18: verifierades svaret med <c>signatureAll</c> (alla fält i den signerade listan <c>signed</c>)?</summary>
+    public bool SignedAll { get; init; }
+    /// <summary>1.0.18: lägsta klientversion som får bidra (signerad, bara med <c>signatureAll</c>); null = ingen gräns.</summary>
+    public string? MinClient { get; init; }
+    /// <summary>1.0.18: kort besked från guiden på svenska respektive engelska (signerat, bara med <c>signatureAll</c>).</summary>
+    public string? Notice { get; init; }
+    public string? NoticeEn { get; init; }
+    /// <summary>1.0.18: fingeravtrycket (<see cref="ReleaseVerifier.Fingerprint"/>) för nyckeln som signerade versionsinfon.</summary>
+    public string? Signer { get; init; }
+    /// <summary>1.0.18: fingeravtrycket för en nyckel som versionsinfon återkallar (signerat fält <c>primaryRevoked</c>,
+    /// bara med <c>signatureAll</c>). Gäller bara när reservnyckeln signerat – se <see cref="Settings.AcceptRelease"/>.</summary>
+    public string? RevokedKey { get; init; }
+
+    /// <summary>Är den här klienten äldre än <see cref="MinClient"/>?</summary>
+    public bool TooOld(Version current) =>
+        Version.TryParse(MinClient, out var min) && new Version(current.Major, current.Minor, Math.Max(0, current.Build)) < new Version(min.Major, min.Minor, Math.Max(0, min.Build));
+
+    /// <summary>Beskedet på användarens språk (det andra språket om det egna saknas).</summary>
+    public string? NoticeFor(bool swedish) => swedish ? Notice ?? NoticeEn : NoticeEn ?? Notice;
 
     public ReleaseFile? File(ReleaseKind k) => k switch { ReleaseKind.Client => ClientFile, ReleaseKind.Lite => LiteFile, ReleaseKind.Mac => MacFile, ReleaseKind.Linux => LinuxFile, _ => AddonFile };
     public string? VersionOf(ReleaseKind k) => k switch { ReleaseKind.Client => Client, ReleaseKind.Lite => Lite, ReleaseKind.Mac => Mac, ReleaseKind.Linux => Linux, _ => Addon };
@@ -66,6 +85,18 @@ public sealed class SignedRelease
 /// signature2 plus <c>mac, macFile, macSha256, macSig</c>. Den används BARA av <see cref="VerifyMac"/>, som kräver den.
 /// <see cref="Verify(string, string)"/> (Windows) bryr sig inte om den, så Windows-klienterna beter sig exakt som förut;
 /// signature och signature2 lämnas orörda av scout-sign.mjs. Mac-filens filsignatur har typen <c>mac</c>.</para>
+///
+/// <para><b>signatureAll</b> (från 1.0.18, alla plattformar) gäller samma kanoniska form över de fält som räknas upp i
+/// det signerade fältet <c>signed</c> ("a,b,c" – bokstavsordning, <c>signed</c> självt ingår). Listan bestäms alltså
+/// av den som signerar, inte av klienten: ett nytt fält (en ny filtyp, en ny uppgift) kräver inget nytt klientsläpp
+/// och ingen sjätte signatur. Finns signatureAll MÅSTE den stämma (ingen reserv), och klienten litar då bara på fält
+/// som står i listan. Saknas den gäller plattformens gamla signatur som förut – tills klienten en gång sett en
+/// signatureAll; därefter krävs den (<see cref="Settings.AcceptRelease"/>), så att den inte kan plockas bort.</para>
+///
+/// <para><b>Två nycklar</b> (från 1.0.18): varje signatur – versionsinfons och filernas – godtas om den stämmer mot
+/// huvudnyckeln ELLER reservnyckeln (<see cref="UpdateKeys"/>). En versionsinfo som reservnyckeln signerat kan bära
+/// det signerade fältet <c>primaryRevoked</c> med huvudnyckelns fingeravtryck: därefter godtar klienten bara
+/// reservnyckeln (<see cref="Settings.AcceptRelease"/>). Huvudnyckeln kan aldrig återkalla reservnyckeln.</para>
 /// </summary>
 public static partial class ReleaseVerifier
 {
@@ -95,6 +126,34 @@ public static partial class ReleaseVerifier
          "mac", "macFile", "macSha256", "macSig", "setup", "setupFile", "setupSha256", "setupSig", "sha256", "v"];
 
     public const int FormatVersion = 1;
+
+    /// <summary>Högst så många fält i <c>signed</c>, och så långa besked (<c>notice</c>).</summary>
+    public const int MaxSignedFields = 200, MaxNotice = 300;
+
+    [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9]{0,40}$")]
+    private static partial Regex FieldName();
+
+    /// <summary>
+    /// Fälten i <c>signed</c> ("a,b,c"), eller null om fältet saknas. Listan ska vara strikt stigande (ordinal, alltså
+    /// utan dubbletter), bara enkla namn, aldrig ett signaturfält, och innehålla <c>signed</c>, <c>issued</c> och
+    /// <c>v</c> – annars är svaret ogiltigt.
+    /// </summary>
+    public static IReadOnlyList<string>? SignedListOf(JsonElement root)
+    {
+        if (!root.TryGetProperty("signed", out var e) || e.ValueKind == JsonValueKind.Null) return null;
+        if (e.ValueKind != JsonValueKind.String) throw new ApiException(ErrorCodes.SignatureInvalid, detail: "signed");
+        var names = (e.GetString() ?? "").Split(',');
+        if (names.Length is < 3 or > MaxSignedFields) throw new ApiException(ErrorCodes.SignatureInvalid, detail: "signed");
+        for (int i = 0; i < names.Length; i++)
+        {
+            var n = names[i];
+            if (!FieldName().IsMatch(n) || n.StartsWith("signature", StringComparison.Ordinal)) throw new ApiException(ErrorCodes.SignatureInvalid, detail: "signed");
+            if (i > 0 && string.CompareOrdinal(names[i - 1], n) >= 0) throw new ApiException(ErrorCodes.SignatureInvalid, detail: "signed");
+        }
+        foreach (var must in (string[])["issued", "signed", "v"])
+            if (Array.IndexOf(names, must) < 0) throw new ApiException(ErrorCodes.SignatureInvalid, detail: "signed");
+        return names;
+    }
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")]
     private static partial Regex SafeName();
@@ -137,8 +196,11 @@ public static partial class ReleaseVerifier
     private static void AppendString(StringBuilder sb, string s)
     {
         sb.Append('"');
-        foreach (var c in s)
+        for (int i = 0; i < s.Length; i++)
         {
+            var c = s[i];
+            // JSON.stringify skriver ett giltigt surrogatpar som det är; bara ett ensamt surrogat blir \uXXXX.
+            if (char.IsHighSurrogate(c) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1])) { sb.Append(c).Append(s[++i]); continue; }
             switch (c)
             {
                 case '"': sb.Append("\\\""); break;
@@ -162,22 +224,68 @@ public static partial class ReleaseVerifier
 
     public static string KindName(ReleaseKind kind) => kind switch { ReleaseKind.Client => "client", ReleaseKind.Lite => "lite", ReleaseKind.Mac => "mac", ReleaseKind.Linux => "linux", _ => "addon" };
 
-    private static ECDsa Key(string publicKeyPem)
+    [GeneratedRegex(@"-----BEGIN PUBLIC KEY-----[A-Za-z0-9+/=\s]+-----END PUBLIC KEY-----")]
+    private static partial Regex PemBlock();
+
+    /// <summary>
+    /// De publika nycklarna i <paramref name="publicKeyPem"/> (1.0.18: en eller flera PEM-block – huvudnyckeln och
+    /// reservnyckeln). Varje nyckel ska vara ECDSA P-256; en trasig nyckel gör hela uppsättningen ogiltig.
+    /// </summary>
+    private sealed class KeySet : IDisposable
     {
-        if (!HasKey(publicKeyPem)) throw new ApiException(ErrorCodes.NoPublicKey);
-        var k = ECDsa.Create();
-        k.ImportFromPem(publicKeyPem);
-        if (k.KeySize != 256) throw new ApiException(ErrorCodes.NoPublicKey);
-        return k;
+        public const int Max = 4;
+        private readonly List<(ECDsa Key, string Fingerprint)> _keys = [];
+
+        public KeySet(string? publicKeyPem)
+        {
+            if (!HasKey(publicKeyPem)) throw new ApiException(ErrorCodes.NoPublicKey);
+            try
+            {
+                var blocks = PemBlock().Matches(publicKeyPem!);
+                if (blocks.Count is 0 or > Max) throw new ApiException(ErrorCodes.NoPublicKey);
+                // Varje påbörjat block ska vara ett helt, läsbart block: ett trasigt (fel tecken, ingen slutrad) får
+                // inte bara hoppas över – då skulle klienten i tysthet köra på en enda nyckel.
+                int begun = 0;
+                for (int i = publicKeyPem!.IndexOf("-----BEGIN", StringComparison.Ordinal); i >= 0; i = publicKeyPem.IndexOf("-----BEGIN", i + 1, StringComparison.Ordinal)) begun++;
+                if (begun != blocks.Count) throw new ApiException(ErrorCodes.NoPublicKey);
+                foreach (Match b in blocks)
+                {
+                    var k = ECDsa.Create();
+                    _keys.Add((k, ""));
+                    k.ImportFromPem(b.Value);
+                    if (k.KeySize != 256) throw new ApiException(ErrorCodes.NoPublicKey);
+                    _keys[^1] = (k, Convert.ToHexString(SHA256.HashData(k.ExportSubjectPublicKeyInfo())).ToLowerInvariant());
+                }
+            }
+            catch (Exception ex) when (ex is CryptographicException or ArgumentException) { Dispose(); throw new ApiException(ErrorCodes.NoPublicKey); }
+            catch { Dispose(); throw; }
+        }
+
+        public string First => _keys[0].Fingerprint;
+
+        /// <summary>Fingeravtrycket för den nyckel som signaturen stämmer mot, eller null.</summary>
+        public string? Verify(byte[] data, string? b64)
+        {
+            if (string.IsNullOrWhiteSpace(b64)) return null;
+            byte[] sig;
+            try { sig = Convert.FromBase64String(b64.Trim()); } catch (FormatException) { return null; }
+            if (sig.Length != 64) return null;
+            foreach (var (key, fp) in _keys)
+                if (key.VerifyData(data, sig, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation)) return fp;
+            return null;
+        }
+
+        public void Dispose() { foreach (var (k, _) in _keys) k.Dispose(); _keys.Clear(); }
     }
 
-    private static bool VerifySig(ECDsa key, byte[] data, string? b64)
+    /// <summary>
+    /// Nyckelns fingeravtryck: SHA-256 (hex, gemener) över den publika nyckeln i DER-form (SubjectPublicKeyInfo) –
+    /// samma värde som <c>scout-sign.mjs</c> skriver ut. Med flera nycklar i texten: den första.
+    /// </summary>
+    public static string Fingerprint(string publicKeyPem)
     {
-        if (string.IsNullOrWhiteSpace(b64)) return false;
-        byte[] sig;
-        try { sig = Convert.FromBase64String(b64.Trim()); } catch (FormatException) { return false; }
-        if (sig.Length != 64) return false;
-        return key.VerifyData(data, sig, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        using var keys = new KeySet(publicKeyPem);
+        return keys.First;
     }
 
     /// <summary>Kontrollerar versionsinfons signatur och returnerar dess innehåll. Kastar vid saknad/ogiltig signatur.</summary>
@@ -197,7 +305,16 @@ public static partial class ReleaseVerifier
 
     private static SignedRelease Verify(string json, string publicKeyPem, bool mac, bool linux)
     {
-        using var key = Key(publicKeyPem);
+        // En JSON-sträng med ett ensamt surrogat (\ud800) går att tolka men inte att läsa ut (GetString kastar
+        // InvalidOperationException). Det är ett trasigt svar, inte en krasch.
+        try { return VerifyCore(json, publicKeyPem, mac, linux); }
+        catch (InvalidOperationException) { throw new ApiException(ErrorCodes.BadResponse); }
+    }
+
+    private static SignedRelease VerifyCore(string json, string publicKeyPem, bool mac, bool linux)
+    {
+        using var keys = new KeySet(publicKeyPem);
+        string? signer;
         JsonDocument doc;
         try { doc = JsonDocument.Parse(json); } catch (JsonException) { throw new ApiException(ErrorCodes.BadResponse); }
         using (doc)
@@ -206,30 +323,44 @@ public static partial class ReleaseVerifier
             if (root.ValueKind != JsonValueKind.Object) throw new ApiException(ErrorCodes.BadResponse);
             static string? SigOf(JsonElement r, string n) =>
                 r.TryGetProperty(n, out var e) && e.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(e.GetString()) ? e.GetString() : null;
-            if (linux)
+            // 1.0.18: signatureAll över fälten i den signerade listan "signed". Finns den MÅSTE den stämma – ingen
+            // reserv till de gamla signaturerna – och bara fält i listan används.
+            HashSet<string>? covered = null;
+            if (SigOf(root, "signatureAll") is { } all)
+            {
+                var fields = SignedListOf(root) ?? throw new ApiException(ErrorCodes.SignatureInvalid, detail: "signed");
+                signer = keys.Verify(Encoding.UTF8.GetBytes(Canonical(root, fields)), all) ?? throw new ApiException(ErrorCodes.SignatureInvalid);
+                covered = new HashSet<string>(fields, StringComparer.Ordinal);
+            }
+            else if (linux)
             {
                 // Linux: signature5 över alla fält måste finnas och stämma. Ingen reserv.
                 var s5 = SigOf(root, "signature5") ?? throw new ApiException(ErrorCodes.SignatureMissing);
-                if (!VerifySig(key, Encoding.UTF8.GetBytes(Canonical(root, SignedFields5)), s5))
-                    throw new ApiException(ErrorCodes.SignatureInvalid);
+                signer = keys.Verify(Encoding.UTF8.GetBytes(Canonical(root, SignedFields5)), s5) ?? throw new ApiException(ErrorCodes.SignatureInvalid);
             }
             else if (mac)
             {
                 // macOS: signature3 över alla fält måste finnas och stämma. Ingen reserv.
                 var s3 = SigOf(root, "signature3") ?? throw new ApiException(ErrorCodes.SignatureMissing);
-                if (!VerifySig(key, Encoding.UTF8.GetBytes(Canonical(root, SignedFields3)), s3))
-                    throw new ApiException(ErrorCodes.SignatureInvalid);
+                signer = keys.Verify(Encoding.UTF8.GetBytes(Canonical(root, SignedFields3)), s3) ?? throw new ApiException(ErrorCodes.SignatureInvalid);
             }
             else
             {
                 // signature2 över det utökade fältsetet måste finnas och stämma. 1.0.7 (L10): ingen reserv till den gamla
                 // signaturen – den finns kvar i filen bara för klienter 1.0.0–1.0.2.
                 var s2 = SigOf(root, "signature2") ?? throw new ApiException(ErrorCodes.SignatureMissing);
-                if (!VerifySig(key, Encoding.UTF8.GetBytes(Canonical(root, SignedFields2)), s2))
-                    throw new ApiException(ErrorCodes.SignatureInvalid);
+                signer = keys.Verify(Encoding.UTF8.GetBytes(Canonical(root, SignedFields2)), s2) ?? throw new ApiException(ErrorCodes.SignatureInvalid);
             }
 
-            string? Str(string n) => root.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            // Med signatureAll: ett fält utanför den signerade listan finns inte för klienten.
+            string? Str(string n) => (covered is null || covered.Contains(n)) && root.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            // Besked: en rad utan styrtecken, högst MaxNotice tecken; tomt = inget.
+            string? Text(string n)
+            {
+                if (covered is null || Str(n) is not { } raw) return null;
+                var t = new string(raw.Select(ch => char.IsControl(ch) ? ' ' : ch).ToArray()).Trim();
+                return t.Length == 0 ? null : t.Length > MaxNotice ? t[..MaxNotice] : t;
+            }
             if (!(root.TryGetProperty("v", out var ver) && ver.ValueKind == JsonValueKind.Number && ver.TryGetInt32(out var fv) && fv == FormatVersion))
                 throw new ApiException(ErrorCodes.BadResponse, detail: "v");
 
@@ -261,15 +392,23 @@ public static partial class ReleaseVerifier
                 Lite = Str("lite"),
                 LiteFile = FileOf(ReleaseKind.Lite, "lite", "liteFile", "liteSha256", "liteSig"),
                 HasSignature2 = true,
-                // Mac-fälten är bara signerade av signature3 – utan den (Windows) ignoreras de.
-                Mac = mac ? Str("mac") : null,
-                MacFile = mac ? FileOf(ReleaseKind.Mac, "mac", "macFile", "macSha256", "macSig") : null,
-                HasSignature3 = mac,
+                // Mac-fälten är bara signerade av signature3 – utan den (Windows) ignoreras de. Med signatureAll är alla
+                // fält i listan signerade, oavsett plattform.
+                Mac = mac || covered != null ? Str("mac") : null,
+                MacFile = mac || covered != null ? FileOf(ReleaseKind.Mac, "mac", "macFile", "macSha256", "macSig") : null,
+                HasSignature3 = mac || covered?.Contains("mac") == true,
                 // Linux-fälten är bara signerade av signature5 – utan den ignoreras de.
-                Linux = linux ? Str("linux") : null,
-                LinuxFile = linux ? FileOf(ReleaseKind.Linux, "linux", "linuxFile", "linuxSha256", "linuxSig") : null,
+                Linux = linux || covered != null ? Str("linux") : null,
+                LinuxFile = linux || covered != null ? FileOf(ReleaseKind.Linux, "linux", "linuxFile", "linuxSha256", "linuxSig") : null,
                 Issued = Str("issued"),
                 BlockedAddons = blocked,
+                SignedAll = covered != null,
+                // Bara med signatureAll (annars är fälten osignerade). En ogiltig version räknas som ingen gräns.
+                MinClient = covered != null && Str("minClient") is { } mc && VersionRx().IsMatch(mc) ? mc : null,
+                Notice = Text("notice"),
+                NoticeEn = Text("noticeEn"),
+                Signer = signer,
+                RevokedKey = covered != null && Str("primaryRevoked")?.ToLowerInvariant() is { } rk && Sha256Rx().IsMatch(rk) ? rk : null,
             };
         }
     }
@@ -304,11 +443,11 @@ public static partial class ReleaseVerifier
     public static void VerifyFile(byte[] data, ReleaseKind kind, ReleaseFile file, string publicKeyPem)
     {
         if (file.Kind != kind) throw new ApiException(ErrorCodes.SignatureInvalid);
-        using var key = Key(publicKeyPem);
+        using var keys = new KeySet(publicKeyPem);
         var sha = ApiClient.Sha256Hex(data);
         if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(sha), Encoding.ASCII.GetBytes(file.Sha256)))
             throw new ApiException(ErrorCodes.ShaMismatch);
-        if (!VerifySig(key, FileMessage(kind, file.Version, sha), file.Signature))
+        if (keys.Verify(FileMessage(kind, file.Version, sha), file.Signature) is null)
             throw new ApiException(ErrorCodes.SignatureInvalid);
     }
 }

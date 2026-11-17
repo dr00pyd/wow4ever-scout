@@ -90,6 +90,10 @@ public static class AddonInstaller
         SafeFs.DeleteDirectory(staging);
         SafeFs.CreateDirectory(staging);
         var stagingFull = Path.GetFullPath(staging) + Path.DirectorySeparatorChar;
+        // 1.0.18: kvittot i spelet (Receipt.lua) skrivs av klienten efter varje uppladdning. Den nya addonen kommer med
+        // en tom standardfil – ett befintligt kvitto behålls, annars skulle addonen efter en uppdatering säga att inget
+        // har skickats. Kvittot läses strikt (bara klientens eget format) och skrivs om från talen, aldrig kopierat.
+        var receipt = AddonReceipt.ReadInstalled(dir);
         foreach (var f in files)
         {
             var rel = f.RelativePath.Replace('/', Path.DirectorySeparatorChar);
@@ -97,7 +101,8 @@ public static class AddonInstaller
             var dest = Path.GetFullPath(Path.Combine(staging, rel));
             if (!dest.StartsWith(stagingFull, StringComparison.OrdinalIgnoreCase)) continue; // ingen ../
             SafeFs.CreateDirectory(Path.GetDirectoryName(dest)!);
-            SafeFs.WriteAllBytes(dest, f.Data);
+            bool isReceipt = receipt is not null && string.Equals(f.RelativePath, AddonReceipt.FileName, StringComparison.OrdinalIgnoreCase);
+            SafeFs.WriteAllBytes(dest, isReceipt ? System.Text.Encoding.ASCII.GetBytes(AddonReceipt.Render(receipt!)) : f.Data);
         }
         SafeFs.DeleteDirectory(old);
         if (SafeFs.DirectoryExists(target)) SafeFs.MoveDirectory(target, old);

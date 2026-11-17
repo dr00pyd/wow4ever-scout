@@ -45,6 +45,7 @@ internal static class Program
         }
 
         using var _instance = instance;
+        if (instance != null) AppImageUpdater.Cleanup(); // 1.0.18: rester (<AppImage>.new) från ett avbrutet byte
         IoRetry.OnRetry = (step, attempt, ex) => UploadLog.Append("update", 0, "-", $"retry step={step} attempt={attempt} {ex.GetType().Name} 0x{ex.HResult:X8}");
         using var api = new ApiClient { Key = message is null ? KeychainStore.Load() : null };
         App.ShowAtStart = !args.Contains("--tray");
